@@ -2,8 +2,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'game_state.dart';
 
-/// Keeps the best run, the last run (screens and crash point), the coin total and the
-/// music on/off choice on the device.
+/// Keeps the best run, the last run (screens and crash point), the coins in the bank, the
+/// shop items bought and worn, the memories found, and the sound on/off choice on the device.
 class SaveStore {
   SaveStore._(this._prefs);
 
@@ -15,6 +15,10 @@ class SaveStore {
   static const _crashYKey = 'crashY';
   static const _crashXKey = 'crashX';
   static const _mutedKey = 'muted';
+  static const _ownedKey = 'owned';
+  static const _skinKey = 'skin';
+  static const _trailKey = 'trail';
+  static const _memoriesKey = 'memories';
 
   bool get muted => _prefs.getBool(_mutedKey) ?? false;
   Future<void> setMuted(bool value) => _prefs.setBool(_mutedKey, value);
@@ -27,6 +31,10 @@ class SaveStore {
         lastScreens: _prefs.getInt(_lastScreensKey),
         crashY: _prefs.getDouble(_crashYKey),
         crashX: _prefs.getDouble(_crashXKey),
+        owned: _prefs.getStringList(_ownedKey) ?? const [],
+        skin: _prefs.getString(_skinKey),
+        trail: _prefs.getString(_trailKey),
+        memories: _prefs.getStringList(_memoriesKey) ?? const [],
       );
 
   Future<void> write(SavedProgress progress) async {
@@ -39,5 +47,10 @@ class SaveStore {
       await _prefs.setDouble(_crashYKey, crashY);
       await _prefs.setDouble(_crashXKey, crashX);
     }
+    await _prefs.setStringList(_ownedKey, progress.owned);
+    final skin = progress.skin, trail = progress.trail;
+    if (skin != null) await _prefs.setString(_skinKey, skin);
+    if (trail != null) await _prefs.setString(_trailKey, trail);
+    await _prefs.setStringList(_memoriesKey, progress.memories);
   }
 }

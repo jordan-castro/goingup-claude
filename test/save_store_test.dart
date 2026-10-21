@@ -20,6 +20,21 @@ void main() {
     expect(saved.crashX, 143.25);
   });
 
+  test('shop items bought and worn, and memories found, survive a round trip', () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = await SaveStore.open();
+    expect(store.read().owned, isEmpty);
+    expect(store.read().skin, isNull);
+
+    await store.write(
+        const SavedProgress(owned: ['berry', 'fire'], skin: 'berry', trail: 'fire', memories: ['sky-0', 'sky-1']));
+    final saved = (await SaveStore.open()).read();
+    expect(saved.memories, ['sky-0', 'sky-1']);
+    expect(saved.owned, ['berry', 'fire']);
+    expect(saved.skin, 'berry');
+    expect(saved.trail, 'fire');
+  });
+
   test('the music on/off choice is remembered', () async {
     SharedPreferences.setMockInitialValues({});
     final store = await SaveStore.open();

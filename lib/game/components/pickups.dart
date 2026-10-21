@@ -35,7 +35,8 @@ class PickupLayer extends Component with HasGameReference<GoingUpGame> {
   int get shownCount => _shown.length;
 }
 
-/// A spinning coin or a bobbing power-up badge, placed at its world position.
+/// A spinning coin, a bobbing power-up badge or a glowing memory fragment, placed at its
+/// world position.
 class PickupComponent extends PositionComponent with HasGameReference<GoingUpGame> {
   PickupComponent(this.pickup) : super(position: Vector2(pickup.x, -pickup.wy));
 
@@ -45,7 +46,9 @@ class PickupComponent extends PositionComponent with HasGameReference<GoingUpGam
   void render(Canvas canvas) {
     final t = game.state.time;
     final power = pickup.powerUp;
-    if (power == null) {
+    if (pickup.memory != null) {
+      drawFragment(canvas, Offset(0, math.sin(t * 2 + pickup.phase) * 4), t + pickup.phase, 11);
+    } else if (power == null) {
       drawCoin(canvas, Offset.zero, 8, spin: math.cos(t * 3 + pickup.phase));
     } else {
       drawPowerUp(canvas, Offset(0, math.sin(t * 3 + pickup.phase) * 3), power, 13);

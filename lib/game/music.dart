@@ -1,6 +1,9 @@
 import 'package:flame_audio/flame_audio.dart';
 
-/// The game's soundtrack, driven by the run's mood (0 = bright start, 1 = dark and mystic).
+import 'stages.dart';
+
+/// The game's soundtrack, driven by how far the climb has gone: its mood (0 bright, 1 full
+/// dark) and how deep into the Void it is (0 to 1).
 abstract class GameMusic {
   bool get muted;
   set muted(bool value);
@@ -8,25 +11,26 @@ abstract class GameMusic {
   /// Starts playback. Safe to call more than once. On the web it must follow a tap or click.
   Future<void> start();
 
-  /// Called every frame. [quiet] turns the music down (on the game-over screen).
-  void update(double mood, {required bool quiet});
+  /// Called every frame. [quiet] turns the music down (on the game-over screen and while a
+  /// memory is showing).
+  void update(double mood, double deep, {required bool quiet});
 
   void pause();
   void resume();
   void dispose();
 }
 
-/// Volume of the day, dusk and night layers for a [mood] from 0 (bright) to 1 (dark).
-({double day, double dusk, double night}) musicMix(double mood) {
-  double ramp(double from, double to) {
-    final t = ((mood - from) / (to - from)).clamp(0.0, 1.0);
-    return t * t * (3 - 2 * t);
-  }
-
+/// Volume of each layer as the climb goes up: the bright day tune in the rainbow sky, the warm
+/// dusk pad at twilight, the broken music box in ashfall and the hollow with the night drone
+/// rising under it, and the heartbeat of the void.
+({double day, double dusk, double creep, double night, double abyss}) musicMix(double mood, double deep) {
+  final st = Stages(mood, deep);
   return (
-    day: 1 - ramp(0.2, 0.65),
-    dusk: ramp(0.05, 0.4) * (1 - 0.7 * ramp(0.7, 1.0)),
-    night: ramp(0.4, 0.9),
+    day: st.candy,
+    dusk: st.wallpaper + 0.3 * st.rust,
+    creep: 0.85 * st.rust + st.hollow + 0.35 * st.abyss,
+    night: 0.45 * st.rust + 0.7 * st.hollow + 0.5 * st.abyss,
+    abyss: st.abyss,
   );
 }
 
@@ -39,7 +43,7 @@ class SilentMusic implements GameMusic {
   Future<void> start() async {}
 
   @override
-  void update(double mood, {required bool quiet}) {}
+  void update(double mood, double deep, {required bool quiet}) {}
 
   @override
   void pause() {}
@@ -51,16 +55,16 @@ class SilentMusic implements GameMusic {
   void dispose() {}
 }
 
-/// Plays the three loops in `assets/audio/` (made by `tool/make_music.py`) together and
-/// crossfades them with the mood. They share one tempo and length, so they stay in step.
+/// Plays the five loops in `assets/audio/` (made by `tool/make_music.py`) together and
+/// crossfades them as the climb goes up. They share one tempo and length, so they stay in step.
 class LayeredMusic implements GameMusic {
-  static const _files = ['day.wav', 'dusk.wav', 'night.wav'];
+  static const _files = ['day.wav', 'dusk.wav', 'creep.wav', 'night.wav', 'void.wav'];
   static const _volume = 0.55, _quietVolume = 0.25;
 
   final List<AudioPlayer> _players = [];
-  final List<double> _applied = [-1, -1, -1];
+  final List<double> _applied = [-1, -1, -1, -1, -1];
   bool _starting = false, _paused = false, _muted = false, _quiet = false;
-  double _mood = 0;
+  double _mood = 0, _deep = 0;
 
   @override
   bool get muted => _muted;
@@ -92,17 +96,18 @@ class LayeredMusic implements GameMusic {
   }
 
   @override
-  void update(double mood, {required bool quiet}) {
+  void update(double mood, double deep, {required bool quiet}) {
     _mood = mood;
+    _deep = deep;
     _quiet = quiet;
     _apply();
   }
 
   void _apply({bool force = false}) {
     if (_players.length != _files.length) return;
-    final mix = musicMix(_mood);
+    final mix = musicMix(_mood, _deep);
     final master = _muted ? 0.0 : (_quiet ? _quietVolume : _volume);
-    final levels = [mix.day, mix.dusk, mix.night];
+    final levels = [mix.day, mix.dusk, mix.creep, mix.night, mix.abyss];
     for (var i = 0; i < _players.length; i++) {
       final v = levels[i] * master;
       if (force || (v - _applied[i]).abs() > 0.01) {

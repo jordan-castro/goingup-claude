@@ -61,9 +61,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Music loops, made by tool/make_music.py
+  # Music loops, made by tool/make_music.py, and sound effects, made by tool/make_sfx.py
   assets:
     - assets/audio/
+    - assets/audio/sfx/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

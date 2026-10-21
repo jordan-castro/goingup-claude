@@ -86,7 +86,6 @@ void main() {
     game.state.pointerDown(GameState.width / 2, game.state.height * 0.72);
     _run(game, 240, (s, _) => _autopilot(s));
     game.state.applyPowerUp(PowerUp.shield);
-    game.state.applyPowerUp(PowerUp.boost);
     _run(game, 40, (s, _) => _autopilot(s));
     await _capture(game, 'bonus_a');
     // loop the loop inside the wide zone, so the trail crosses itself

@@ -19,7 +19,7 @@ void main() {
 class GoingUpApp extends StatelessWidget {
   const GoingUpApp({super.key, this.music = true});
 
-  /// Whether to play the soundtrack (tests turn it off).
+  /// Whether to play the soundtrack and sound effects (tests turn it off).
   final bool music;
 
   @override

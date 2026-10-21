@@ -61,6 +61,24 @@ abstract final class PixelFont {
   /// Width of [text] when each font pixel is [px] units.
   static double widthOf(String text, double px) => text.isEmpty ? 0 : (text.length * 6 - 1) * px;
 
+  /// [text] broken into lines of at most [maxChars] characters, between words.
+  static List<String> wrap(String text, int maxChars) {
+    final lines = <String>[];
+    var line = '';
+    for (final word in text.split(' ')) {
+      if (line.isEmpty) {
+        line = word;
+      } else if (line.length + 1 + word.length <= maxChars) {
+        line = '$line $word';
+      } else {
+        lines.add(line);
+        line = word;
+      }
+    }
+    if (line.isNotEmpty) lines.add(line);
+    return lines;
+  }
+
   /// Glyph cells for [ch], or null for a space or an unknown character.
   static String? glyph(String ch) => _glyphs[ch] ?? _glyphs[ch.toUpperCase()];
 

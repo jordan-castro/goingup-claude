@@ -15,15 +15,21 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'components/atmosphere.dart';
 import 'components/bunny.dart';
 import 'components/crash_marker.dart';
+import 'components/hollows.dart';
 import 'components/hud.dart';
 import 'components/pickups.dart';
+import 'components/memories_screen.dart';
+import 'components/shop_screen.dart';
 import 'components/starfield.dart';
 import 'components/trail.dart';
 import 'components/tunnel.dart';
+import 'drawing.dart';
 import 'game_state.dart';
 import 'music.dart';
 import 'palette.dart';
+import 'sfx.dart';
 import 'sprites.dart';
+import 'stages.dart';
 
 /// The Flame side of goingUP: runs [state] every frame and shows (and plays) it.
 ///
@@ -32,12 +38,21 @@ import 'sprites.dart';
 /// (between a 1.6 and 2.175 aspect, letterboxed beyond that), and the viewfinder scrolls with
 /// the distance flown.
 class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
-  GoingUpGame({GameState? state, GameMusic? music})
+  GoingUpGame({GameState? state, GameMusic? music, GameSfx? sfx})
       : state = state ?? GameState(),
-        music = music ?? SilentMusic();
+        music = music ?? SilentMusic(),
+        sfx = sfx ?? SilentSfx();
 
   final GameState state;
   final GameMusic music;
+  final GameSfx sfx;
+
+  /// Mutes (or unmutes) the music and the sound effects together.
+  bool get muted => music.muted;
+  set muted(bool value) {
+    music.muted = value;
+    sfx.muted = value;
+  }
 
   /// Called when the player mutes or unmutes, so the choice can be saved.
   void Function(bool muted)? onMuteChanged;
@@ -46,11 +61,28 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   /// and music follow this rather than [GameState.mood] directly.
   double mood = 0;
 
+  /// How far into the Void the picture is, eased the same way from [GameState.deep].
+  double deep = 0;
+
+  /// How broken and twisted the scenery looks: shards from twilight, cracks from starfall,
+  /// warping from runelight, tearing in the Void. 0 to 1.
+  double get corruption => (0.75 * mood + 0.25 * deep).clamp(0.0, 1.0);
+
+  /// How much of each realm's look is showing right now.
+  Stages get stages => Stages(mood, deep);
+
   Sprites? _sprites;
   Sprites get sprites => _sprites!;
   late final List<Component> _overlays; // field-space layers in the viewport, over the world
+  final ShopScreen shop = ShopScreen();
+  final MemoriesScreen book = MemoriesScreen();
   final _rng = math.Random();
   int? _pointer; // the one pointer that steers; extra fingers are ignored
+
+  /// The picture tearing in the deepest realms: seconds left, and the torn bands as (top and
+  /// height as fractions of the screen, sideways shift in field units).
+  double _glitch = 0;
+  final List<(double, double, double)> _tears = [];
 
   /// System bars over the game (set by the host widget), turned into field units below.
   EdgeInsets safePadding = EdgeInsets.zero;
@@ -79,7 +111,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   Future<void> onLoad() async {
     _sprites = Sprites();
     state.height = fieldHeightFor(size);
-    _overlays = [Atmosphere(), Hud()];
+    _overlays = [Atmosphere(), shop, book, Hud()]; // the HUD's speaker button stays on top
     camera = CameraComponent(
       world: world,
       viewport: FixedResolutionViewport(resolution: Vector2(GameState.width, state.height)),
@@ -87,9 +119,9 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
     );
     camera.viewfinder.anchor = Anchor.topLeft;
     camera.viewport.addAll(_overlays);
-    world.addAll([Trail(), Tunnel(), PickupLayer(), CrashMarkerView(), BunnyView()]);
+    world.addAll([Trail(), Tunnel(), PickupLayer(), HollowLayer(), CrashMarkerView(), BunnyView()]);
     _followState();
-    if (!kIsWeb) music.start(); // browsers only allow sound after a tap or click
+    if (!kIsWeb) _startSound(); // browsers only allow sound after a tap or click
   }
 
   @override
@@ -116,12 +148,49 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
       world.add(_particles(burst));
     }
     state.bursts.clear();
-    final target = state.mood;
+    for (final cue in state.sounds) {
+      sfx.play(cue);
+    }
+    state.sounds.clear();
+    final target = state.mood, deepTarget = state.deep;
     final rate = target < mood ? 1.5 : 4.0; // a new run brightens back over a couple of seconds
     mood += (target - mood) * (1 - math.exp(-rate * math.min(dt, 0.1)));
-    music.update(mood, quiet: state.mode == GameMode.dead);
+    deep += (deepTarget - deep) * (1 - math.exp(-(deepTarget < deep ? 2.0 : 4.0) * math.min(dt, 0.1)));
+    music.update(mood, deep, quiet: state.mode == GameMode.dead || state.readingMemory);
+    _glitch = math.max(0.0, _glitch - dt);
+    final tearing = state.mode == GameMode.playing ? 0.15 * ramp(corruption, 0.7, 1) + 0.45 * deep : 0.0;
+    if (_glitch <= 0 && _rng.nextDouble() < tearing * dt) _tear();
     _followState();
     super.update(dt);
+  }
+
+  /// Starts a short glitch: a few bands of the picture slip sideways, with a crackle.
+  void _tear() {
+    _glitch = 0.08 + _rng.nextDouble() * 0.16;
+    _tears
+      ..clear()
+      ..addAll([
+        for (var i = 0, n = 2 + _rng.nextInt(3); i < n; i++)
+          (_rng.nextDouble() * 0.95, 0.008 + _rng.nextDouble() * 0.05, (_rng.nextDouble() - 0.5) * 36),
+      ]);
+    sfx.play(const SoundCue(Sfx.glitch));
+  }
+
+  @override
+  void render(Canvas canvas) {
+    super.render(canvas);
+    if (_glitch <= 0) return;
+    final scale = size.x / GameState.width;
+    for (final (top, height, shift) in _tears) {
+      final band = Rect.fromLTWH(0, top * size.y, size.x, height * size.y);
+      canvas.save();
+      canvas.clipRect(band);
+      canvas.translate(shift * scale, 0);
+      super.render(canvas);
+      canvas.restore();
+      canvas.drawRect(Rect.fromLTWH(0, band.top, size.x, 1.5), Paint()..color = Palette.hot.withValues(alpha: 0.6));
+      canvas.drawRect(Rect.fromLTWH(0, band.bottom - 1.5, size.x, 1.5), Paint()..color = Palette.glimmer.withValues(alpha: 0.5));
+    }
   }
 
   /// Point the camera at the part of the tunnel in view, plus any shake.
@@ -179,17 +248,55 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
 
   bool get showsMuteButton => state.mode != GameMode.playing;
 
+  /// The shop button, bottom-right on the title and game-over screens (field units).
+  Rect get shopButton => Rect.fromLTWH(GameState.width - 102, state.height - safeBottom - 44, 92, 32);
+
+  bool get showsShopButton => !shop.isOpen && !book.isOpen && (state.mode == GameMode.title || state.showGameOver);
+
+  /// The memories book's button, bottom-centre on the title and game-over screens.
+  Rect get memoriesButton => Rect.fromLTWH((GameState.width - 132) / 2, state.height - safeBottom - 44, 132, 32);
+
+  bool get showsMemoriesButton => showsShopButton;
+
+  /// Something in the shop that isn't owned yet costs no more than the coins in the bank.
+  bool get canBuySomething =>
+      [...Shop.skins, ...Shop.trails].any((item) => !state.owns(item) && state.canAfford(item));
+
   void toggleMute() {
-    music.muted = !music.muted;
-    onMuteChanged?.call(music.muted);
+    muted = !muted;
+    onMuteChanged?.call(muted);
   }
 
-  /// A press at [field] (field units). Returns false if it hit the mute button instead of
-  /// starting or steering the bunny.
+  void _startSound() {
+    music.start();
+    sfx.load();
+  }
+
+  /// A press at [field] (field units). Returns false if it went to a button or the shop
+  /// instead of starting or steering the bunny.
   bool press(Vector2 field, {required bool touch}) {
-    music.start(); // the first tap is when browsers allow sound
-    if (showsMuteButton && muteButton.inflate(6).contains(Offset(field.x, field.y))) {
+    _startSound(); // the first tap is when browsers allow sound
+    final point = Offset(field.x, field.y);
+    if (showsMuteButton && muteButton.inflate(6).contains(point)) {
       toggleMute();
+      return false;
+    }
+    if (shop.isOpen) {
+      shop.press(point);
+      return false;
+    }
+    if (book.isOpen) {
+      book.press(point);
+      return false;
+    }
+    if (showsMemoriesButton && memoriesButton.inflate(4).contains(point)) {
+      book.open();
+      sfx.play(const SoundCue(Sfx.click));
+      return false;
+    }
+    if (showsShopButton && shopButton.inflate(6).contains(point)) {
+      shop.open();
+      sfx.play(const SoundCue(Sfx.click));
       return false;
     }
     state.pointerDown(field.x, field.y, touch: touch);
@@ -198,8 +305,27 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
 
   @override
   KeyEventResult onKeyEvent(KeyEvent event, Set<LogicalKeyboardKey> keysPressed) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyM) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.keyM) {
       toggleMute();
+      return KeyEventResult.handled;
+    }
+    if (state.readingMemory &&
+        (event.logicalKey == LogicalKeyboardKey.space || event.logicalKey == LogicalKeyboardKey.enter)) {
+      state.continueMemory();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape && (shop.isOpen || book.isOpen)) {
+      shop.close();
+      book.close();
+      return KeyEventResult.handled;
+    }
+    if (book.isOpen && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      book.turn(-1);
+      return KeyEventResult.handled;
+    }
+    if (book.isOpen && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      book.turn(1);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -244,6 +370,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
     _sprites?.dispose();
     _sprites = null;
     music.dispose();
+    sfx.dispose();
     super.onRemove();
   }
 }

@@ -6,15 +6,14 @@ import 'game_state.dart' show PowerUp;
 abstract final class Palette {
   static const coin = Color(0xFFE8BE48);
   static const coinRim = Color(0xFFB0832A);
-  static const boost = Color(0xFFE6944E);
-  static const slow = Color(0xFF549CD4);
-  static const freeze = Color(0xFF7CCFE0);
   static const shield = Color(0xFFC98AE0);
 
+  // The Hollow Ones: ragged dark plush, a blood-red rim and a glowing red eye.
+  static const hollow = Color(0xFF221A20);
+  static const hollowRim = Color(0xFFB0283C);
+  static const hollowEye = Color(0xFFFF4040);
+
   static Color powerUp(PowerUp p) => switch (p) {
-        PowerUp.boost => boost,
-        PowerUp.slow => slow,
-        PowerUp.freeze => freeze,
         PowerUp.shield => shield,
       };
 
@@ -29,6 +28,28 @@ abstract final class Palette {
   static const mistTeal = Color(0xFF2C8C8A);
   static const glimmer = Color(0xFF9FE8DC);
   static const fog = Color(0xFF8C7FD0);
+
+  // Realms of the climb: the sunset glow of twilight, the moon (eclipsed in the Void), aurora,
+  // runes and the Void itself.
+  static const sunsetAmber = Color(0xFFF0A060);
+  static const sunsetRose = Color(0xFFE07A8C);
+  static const moon = Color(0xFFEDE6FF);
+  static const moonShade = Color(0xFFC9BEEA);
+  static const moonGlow = Color(0xFFB9A8FF);
+  static const corona = Color(0xFFC4A6FF);
+  static const blood = Color(0xFFC0283A);
+  static const auroraGreen = Color(0xFF5FE0B0);
+  static const auroraViolet = Color(0xFFA77CF0);
+  static const runeViolet = Color(0xFFB79CFF);
+  static const spaceVoid = Color(0xFF030207);
+  static const rimVoid = Color(0xFFB9A6FF);
+  static const voidEye = Color(0xFFE8DDFF);
+
+  // Memories: torn parchment and ink, and the sepia of a flashback.
+  static const parchment = Color(0xFFEADFC4);
+  static const parchmentShade = Color(0xFFC9B48E);
+  static const inkRed = Color(0xFF8E2A3A);
+  static const sepia = Color(0xFF8A5A30);
   static const shade = Color(0xFF000000);
   static const ink = Color(0xFF221834);
   static const star = Color(0xFFD6D6EC);
