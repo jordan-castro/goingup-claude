@@ -16,9 +16,9 @@ enum GameMode { title, playing, dead }
 /// Collectible power-ups. Only the shield is left: it waits for a hit.
 enum PowerUp { shield }
 
-/// Sound effects. Coins also carry a step: a quick run of them climbs the scale.
+/// Sound effects. Coins are silent: picking them up happens too often to want a sound.
 enum Sfx {
-  coin, shield, bump, crash, takeoff, ghost, milestone, newBest, hollowPop, realm, memory, glitch,
+  shield, bump, crash, takeoff, ghost, milestone, newBest, hollowPop, realm, memory, glitch,
   click, buy, nope, // shop buttons
 }
 
@@ -34,13 +34,12 @@ class Realm {
 
 /// A sound for the view to play.
 class SoundCue {
-  const SoundCue(this.sfx, [this.step = 0]);
+  const SoundCue(this.sfx);
 
   final Sfx sfx;
-  final int step;
 
   @override
-  String toString() => step == 0 ? sfx.name : '${sfx.name}$step';
+  String toString() => sfx.name;
 }
 
 /// What survives between sessions.
@@ -202,14 +201,12 @@ class GameState {
   static const double _passage = 56; // room a hollow always leaves on one side
   static const double _hollowMinGap = 2 * (Hollow.radius + _passage) + 2;
   static const double _maxHollowDrift = 150; // fastest sideways speed, units per second
-  static const double _forkGap = 330, _forkLength = 560, _forkSpread = 95;
+  static const double _forkGap = 300, _forkLength = 420, _forkSpread = 95;
   static const double _magnetReach = 110;
   static const double _headStartFactor = 1.5;
   static const int _maxTrail = 900;
   static const int _maxBursts = 40;
   static const int _maxSounds = 16;
-  static const int coinSteps = 5;
-  static const double _coinRunGap = 0.5; // coins closer together than this climb the scale
 
   final GameTuning tuning;
   math.Random _rng;
@@ -312,6 +309,7 @@ class GameState {
   final List<_Control> _queued = []; // planned stretches (bonus zones, open sections, forks)
   int _ctrlIdx = 0;
   double _nextZoneWy = double.infinity;
+  double _nextNestWy = double.infinity; // the next pocket where Hollow Ones wait
   final List<WallSample> walls = [];
   int _sampleId = 0;
   double _nextW = 0, _wobble = 0;
@@ -328,8 +326,6 @@ class GameState {
 
   /// Sounds waiting for the view to play them. The view empties this list.
   final List<SoundCue> sounds = [];
-  int _coinStep = 0;
-  double _lastCoinTime = -1;
 
   double? _crashY, _crashX;
   CrashMarker? marker;
@@ -524,6 +520,7 @@ class GameState {
     _queued.addAll([_Control(a, centre, _forkGap), _Control(a + _forkLength, centre, _forkGap)]);
     // the next bonus stretch keeps its distance, so the two don't run together
     _nextZoneWy = math.max(_nextZoneWy, a + _forkLength + 25 * unitsPerMeter);
+    _nextNestWy = math.max(_nextNestWy, a + _forkLength + 15 * unitsPerMeter);
     for (var i = 0; i < 3; i++) {
       final wy = a + 40 + i * 40;
       pickups.add(Pickup.coin(centre, wy, wy * 0.05));
@@ -895,9 +892,6 @@ class GameState {
       runCoins += value;
       coinPopTime = 0.2;
       _burst(p.x, p.wy, 6, const [Palette.coin, Palette.text], 40, 160);
-      _coinStep = time - _lastCoinTime < _coinRunGap ? math.min(_coinStep + 1, coinSteps - 1) : 0;
-      _lastCoinTime = time;
-      _sound(Sfx.coin, _coinStep);
       onSave?.call(progress);
     } else {
       applyPowerUp(power);
@@ -941,8 +935,6 @@ class GameState {
     spareLife = hasPerk(Perk.secondChance);
     _hitTime = -1;
     _hollowClock = 0;
-    _coinStep = 0;
-    _lastCoinTime = -1;
     _sound(Sfx.takeoff);
     final cy = _crashY, cx = _crashX;
     marker = !versus && cy != null && cx != null ? CrashMarker(cy, cx) : null;
@@ -989,8 +981,8 @@ class GameState {
     toastTime = 1.6;
   }
 
-  void _sound(Sfx sfx, [int step = 0]) {
-    sounds.add(SoundCue(sfx, step));
+  void _sound(Sfx sfx) {
+    sounds.add(SoundCue(sfx));
     if (sounds.length > _maxSounds) sounds.removeAt(0); // nobody is draining (e.g. in tests)
   }
 
@@ -1033,14 +1025,20 @@ class GameState {
       _planBonusZone(prev);
       return _queued.removeAt(0);
     }
-    final openChance = _hollowChanceAt(prev.wy) > 0 ? tuning.openSectionChanceLate : tuning.openSectionChance;
-    if (_rng.nextDouble() < openChance) {
+    // a nest waits for a fork or bonus stretch coming up just after it, so open spaces stay apart
+    if (prev.wy + 450 >= _nextNestWy &&
+        !_forkDueBefore(_nextNestWy + 10 * unitsPerMeter) &&
+        _nextZoneWy > _nextNestWy + 25 * unitsPerMeter) {
+      _planOpenSection(prev, nest: true);
+      return _queued.removeAt(0);
+    }
+    if (_rng.nextDouble() < tuning.openSectionChance) {
       _planOpenSection(prev);
       return _queued.removeAt(0);
     }
 
     final d = _difficultyAt(prev.wy);
-    final gMin = _lerp(170, 104, d), gMax = _lerp(290, 210, d);
+    final gMin = _lerp(140, 104, d), gMax = _lerp(215, 170, d); // corridors, not halls
     final gap = _rng.nextDouble() < _lerp(0.25, 0.45, d) ? gMin + _rand(0, 14) : _rand(gMin, gMax);
     final shift = _lerp(110, 175, d);
     final lo = gap / 2 + 14, hi = width - gap / 2 - 14;
@@ -1068,7 +1066,7 @@ class GameState {
   /// A long wide-open stretch with a snake of coins and one power-up.
   void _planBonusZone(_Control prev) {
     final start = math.max(_nextZoneWy, prev.wy + 300);
-    final length = math.max(900.0, expectedSpeedAt(start) * tuning.bonusZoneSeconds);
+    final length = math.max(700.0, expectedSpeedAt(start) * tuning.bonusZoneSeconds);
     _queued.addAll([
       _Control(start, width / 2, _wideGap),
       _Control(start + length / 2, width / 2, _wideGap),
@@ -1083,24 +1081,31 @@ class GameState {
     while (_nextZoneWy < start + length + 2 * unitsPerMeter) {
       _nextZoneWy += every;
     }
+    _nextNestWy = math.max(_nextNestWy, start + length + 15 * unitsPerMeter);
   }
 
-  /// A shorter wide spot in the ordinary tunnel, with a few coins down the middle. Once the
+  /// A short wide pocket in the ordinary tunnel, with a few coins down the middle. Once the
   /// Hollow Ones are about, this open space is where they wait: one, or late on sometimes two
-  /// at different heights.
-  void _planOpenSection(_Control prev) {
-    final gap = _rand(290, 340);
+  /// at different heights. A [nest] always holds one.
+  void _planOpenSection(_Control prev, {bool nest = false}) {
+    final gap = _rand(230, 280); // wider than any corridor, room for a hollow to hop
     final centre = width / 2 + _rand(-15, 15);
     final stretch = _stretchAt(prev.wy);
-    final a = prev.wy + _rand(300, 420) * stretch;
-    final b = a + _rand(260, 380) * stretch;
+    final a = prev.wy + _rand(240, 320) * stretch; // opens quickly, so the pocket stays short
+    final b = a + _rand(200, 280) * stretch;
     _queued.addAll([_Control(a, centre, gap), _Control(b, centre, gap)]);
     for (var i = 0; i < 6; i++) {
       final wy = a + (b - a) * (i + 0.5) / 6;
       pickups.add(Pickup.coin(centre + math.sin(i * 0.9) * 40, wy, wy * 0.05));
     }
+    if (nest) {
+      final every = tuning.hollowNestEveryMeters * unitsPerMeter;
+      while (_nextNestWy < b + 10 * unitsPerMeter) {
+        _nextNestWy += every;
+      }
+    }
     final chance = _hollowChanceAt(a);
-    if (chance > 0 && _rng.nextDouble() < chance) {
+    if (nest || (chance > 0 && _rng.nextDouble() < chance)) {
       final two = _rng.nextDouble() < chance * 0.5;
       if (two) {
         _addHollow(a + (b - a) / 3, centre, gap);
@@ -1188,8 +1193,13 @@ class GameState {
     hollows.clear();
     _forksPlanned.clear();
     _ctrlIdx = 0;
+    // the first one half as far in, so with realms as far apart, each comes halfway through
+    // a realm, well clear of the memory forks
     _nextZoneWy =
-        tuning.bonusZoneEveryMeters > 0 ? tuning.bonusZoneEveryMeters * unitsPerMeter : double.infinity;
+        tuning.bonusZoneEveryMeters > 0 ? tuning.bonusZoneEveryMeters * unitsPerMeter / 2 : double.infinity;
+    final nests = tuning.hollowNestEveryMeters * unitsPerMeter;
+    _nextNestWy =
+        tuning.hollowChance > 0 && nests > 0 ? realmStart(tuning.hollowsFromRealm) + nests / 2 : double.infinity;
     walls.clear();
     _sampleId = 0;
     _nextW = distance - 120;

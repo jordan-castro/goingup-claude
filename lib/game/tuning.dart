@@ -4,10 +4,9 @@
 /// Distances are in in-game meters: the bunny is half a meter long.
 class GameTuning {
   const GameTuning({
-    this.bonusZoneEveryMeters = const int.fromEnvironment('BONUS_ZONE_EVERY_METERS', defaultValue: 65),
-    this.bonusZoneSeconds = 3.5,
-    this.openSectionChance = 0.1,
-    this.openSectionChanceLate = 0.3,
+    this.bonusZoneEveryMeters = const int.fromEnvironment('BONUS_ZONE_EVERY_METERS', defaultValue: 130),
+    this.bonusZoneSeconds = 2,
+    this.openSectionChance = 0.04,
     this.powerUpChance = 0.05,
     this.shieldHitSlowFactor = 0.5,
     this.shieldHitSlowSeconds = 2,
@@ -16,21 +15,23 @@ class GameTuning {
     this.hardestAtMeters = 260,
     this.hollowsFromRealm = 2,
     this.hollowsCommonAtRealm = 4,
-    this.hollowChance = 0.75,
+    this.hollowChance = 0.9,
+    this.hollowNestEveryMeters = 40,
     this.milestoneEveryMeters = 100,
   });
 
-  /// A wide-open bonus stretch full of coins starts every this many meters. 0 turns it off.
+  /// A wide-open bonus stretch full of coins starts every this many meters, the first one half
+  /// as far in: with the realms as far apart, that's halfway through each realm, clear of the
+  /// memory forks. 0 turns it off.
   /// Also settable per build: `flutter run --dart-define=BONUS_ZONE_EVERY_METERS=20`.
   final int bonusZoneEveryMeters;
 
   /// How long a bonus stretch lasts, in seconds at the speed flown there.
   final double bonusZoneSeconds;
 
-  /// Chance that the next stretch of ordinary tunnel opens up wide (with a short line of
-  /// coins), at any speed. Once the Hollow Ones are about, [openSectionChanceLate] instead:
-  /// they only ever turn up in open space, so open space comes more often.
-  final double openSectionChance, openSectionChanceLate;
+  /// Chance that the next stretch of ordinary tunnel opens into a short wide pocket (with a
+  /// line of coins), at any speed. Kept low: the tunnel is mostly corridor.
+  final double openSectionChance;
 
   /// Chance that a stretch of ordinary tunnel holds a shield (the only power-up).
   final double powerUpChance;
@@ -53,12 +54,14 @@ class GameTuning {
   /// The tunnel is at its narrowest and twistiest from here on.
   final double hardestAtMeters;
 
-  /// The Hollow Ones turn up from the start of realm [hollowsFromRealm] (2 is Ashfall) and are
-  /// at their most common by the start of realm [hollowsCommonAtRealm], when a stretch of open
-  /// space gets one with chance [hollowChance]. They only ever appear in open space, never in a
-  /// narrow corridor. A [hollowChance] of 0 turns them off.
+  /// The Hollow Ones turn up from the start of realm [hollowsFromRealm] (2 is Ashfall). They
+  /// only ever wait in open space, never in a narrow corridor: every [hollowNestEveryMeters]
+  /// the corridor opens into a short pocket where one waits, and a random wide pocket holds one
+  /// with a chance growing to [hollowChance] by the start of realm [hollowsCommonAtRealm], as
+  /// does the chance of a second one in the same pocket. A [hollowChance] of 0 turns them off.
   final int hollowsFromRealm, hollowsCommonAtRealm;
   final double hollowChance;
+  final double hollowNestEveryMeters;
 
   /// "100 METERS!" every this many meters.
   final int milestoneEveryMeters;

@@ -15,10 +15,14 @@ Built with Flutter and the [Flame](https://flame-engine.org) game engine. Packag
 
 ## Coins, wide spots and the shield
 
-- **Bonus zones:** every 65 meters the tunnel opens wide for a few seconds, with a snake of coins
-  and a shield. A bonus zone that would run into a memory fork waits until the fork has passed.
-- **Wide spots:** ordinary tunnel also opens up at random now and then, at any speed, with a short
-  line of coins.
+The tunnel is mostly corridor: 140 to 215 units wide at the start (the field is 400 wide),
+narrowing to 104 to 170 as it gets harder. Open space is rare and short.
+
+- **Bonus zones:** halfway through each realm (at 65 m, 195 m, 325 m and so on) the tunnel opens
+  wide for a couple of seconds, with a snake of coins and a shield. If a different spacing would
+  run one into a memory fork, it waits until the fork has passed.
+- **Wide spots:** now and then, at any speed, the corridor opens into a short pocket with a line of
+  coins. Picking up coins makes no sound.
 - **Shields** (purple badges, now and then in the tunnel) are the only power-up. A shield absorbs
   one hit, from a wall or a Hollow One. The level then runs at half speed for 2 s and catches back
   up in 0.5 s. The shield stays until it's used.
@@ -70,8 +74,9 @@ common as they get. The first one in each run comes with a warning:
 
 - Touch one and the run ends with "GOT YOU." instead of "BONK!".
 - A shield tears one apart instead.
-- They only ever wait in open space, the wide spots, never in a narrow corridor. Once they're
-  about, wide spots come more often, and most of them hold one (late on, sometimes two). Wherever
+- They only ever wait in open space, never in a corridor. Every 40 meters or so the corridor
+  opens into a short pocket where one waits (deeper in, sometimes two), kept clear of the memory
+  forks and bonus zones. The rare random wide spots may hold one too. Wherever
   one hops, one side always has 56 units free for the bunny.
 - Only the body can catch the bunny; the ears and the leap are just for show.
 
@@ -80,7 +85,7 @@ bonus zone interval and the realm spacing for one build without editing code, fo
 the dark realms quickly while trying things out:
 
 ```bash
-flutter run -d chrome --dart-define=BONUS_ZONE_EVERY_METERS=20 --dart-define=REALM_EVERY_METERS=15
+flutter run -d chrome --dart-define=BONUS_ZONE_EVERY_METERS=15 --dart-define=REALM_EVERY_METERS=15
 ```
 
 ## Into the dark: the realms
@@ -165,9 +170,8 @@ Each memory has an `id` that is saved on the device, so never rename one.
 
 ## Sound effects
 
-Short sounds play for:
+Short sounds play for the moments below. Picking up coins is silent: it happens too often.
 
-- **Coins:** a soft, muffled music-box tink, kept quiet; a quick run of coins climbs the scale.
 - **The shield:** a quiet, airy swell when you pick one up, and a boing when it takes a hit.
 - **The run:** takeoff, crashing, flying past the last crash, every 100 meters and a new best.
 - **The Hollow Ones:** a ragged rip and a falling shriek when the shield tears one apart.
@@ -271,7 +275,7 @@ The tests cover:
   wide spots still appear late in a fast run.
 - The shield absorbs a hit, then slows and recovers on schedule.
 - Coins, the best run, the last crash and the shop items bought and worn are saved and restored.
-- A quick run of coins climbs the scale, and the big moments each make a sound.
+- Coins are silent, and the big moments each make a sound.
 - The Hollow Ones wait until Ashfall, only in open space, always leave a way past, end the run (or
   are torn apart by the shield), and hop with a crouch first as a warning.
 - The shop sells each item once for coins and puts it on; items that no longer exist are ignored.

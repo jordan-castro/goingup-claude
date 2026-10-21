@@ -171,7 +171,7 @@ void main() {
   });
 
   test('walls still open up wide late in a fast run', () {
-    // ordinary tunnel at full difficulty is never wider than about 210
+    // ordinary tunnel at full difficulty is never wider than about 180
     final game = GameState(
         seed: 6,
         tuning: const GameTuning(bonusZoneEveryMeters: 0, powerUpChance: 0, openSectionChance: 0.3, hollowChance: 0));
@@ -180,7 +180,7 @@ void main() {
     while (game.mode == GameMode.playing && game.meters < 380) {
       _autopilot(game);
       game.update(_frame);
-      if (game.meters > 300) lateWide = lateWide || game.walls.any((s) => s.right - s.left >= 285);
+      if (game.meters > 300) lateWide = lateWide || game.walls.any((s) => s.right - s.left >= 225);
     }
     expect(game.meters, greaterThanOrEqualTo(380));
     expect(lateWide, isTrue);
@@ -198,7 +198,7 @@ void main() {
     expect(saved?.coins, 41);
   });
 
-  test('a quick run of coins climbs the scale, and the big moments make a sound', () {
+  test('coins are silent, and the big moments make a sound', () {
     final game =
         GameState(seed: 9, tuning: const GameTuning(powerUpChance: 0, bonusZoneEveryMeters: 0, openSectionChance: 0));
     game.pointerDown(GameState.width / 2, game.height * 0.72);
@@ -218,17 +218,8 @@ void main() {
         game.update(_frame); // a tenth of a second between coins
       }
     }
-    expect(game.sounds.map((c) => c.sfx).toSet(), {Sfx.coin});
-    expect(game.sounds.map((c) => c.step), [0, 1, 2, 3, 4, 4, 4], reason: 'up the scale, then stays at the top');
-    game.sounds.clear();
-
-    for (var f = 0; f < 60; f++) {
-      _autopilot(game);
-      game.update(_frame);
-    }
-    take((x, wy) => Pickup.coin(x, wy, 0));
-    expect(game.sounds.single.step, 0, reason: 'after a pause the scale starts again');
-    game.sounds.clear();
+    expect(game.runCoins, 7);
+    expect(game.sounds, isEmpty, reason: 'picking up coins makes no sound');
 
     take((x, wy) => Pickup.powerUp(x, wy, PowerUp.shield, 0));
     expect(game.sounds.map((c) => c.sfx), [Sfx.shield]);
@@ -331,7 +322,7 @@ void main() {
         if (sy < 0 || sy > game.height) continue; // walls are only known around the screen
         final (l, r) = game.wallAt(g.wy);
         checked++;
-        expect(r - l, greaterThanOrEqualTo(250), reason: 'never in a narrow corridor');
+        expect(r - l, greaterThanOrEqualTo(220), reason: 'never in a corridor (at most about 180 wide here)');
         expect(g.x - Hollow.radius, greaterThanOrEqualTo(l), reason: 'clear of the left wall');
         expect(g.x + Hollow.radius, lessThanOrEqualTo(r), reason: 'clear of the right wall');
         final room = math.max(g.x - Hollow.radius - l, r - g.x - Hollow.radius);
@@ -343,8 +334,8 @@ void main() {
     final ashfall = const GameTuning().hollowsFromRealm * const GameTuning().realmEveryMeters;
     expect(firstMeters, greaterThanOrEqualTo(ashfall - 25),
         reason: 'hollows are planned a little ahead of where they appear');
-    expect(seen.length, greaterThan(4));
-    expect(checked, greaterThan(100));
+    expect(seen.length, greaterThanOrEqualTo(4), reason: 'a pocket of them every 40 meters or so');
+    expect(checked, greaterThan(60));
     expect(warned, isTrue, reason: 'the first hollow of a run comes with a warning');
   });
 
