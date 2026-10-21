@@ -5,15 +5,15 @@ class GameTuning {
     this.bonusZoneEvery = const int.fromEnvironment('BONUS_ZONE_EVERY', defaultValue: 10),
     this.bonusZoneSeconds = 3.5,
     this.openSectionChance = 0.1,
-    this.powerUpChance = 0.14,
-    this.boostFactor = 1.25,
-    this.slowFactor = 0.8,
-    this.boostSeconds = 6,
-    this.slowSeconds = 6,
-    this.freezeSeconds = 3,
+    this.powerUpChance = 0.05,
     this.shieldHitSlowFactor = 0.5,
     this.shieldHitSlowSeconds = 2,
     this.darkestAtScreen = 45,
+    this.deepestAtScreen = 60,
+    this.hollowsFromScreen = 25,
+    this.hollowsCommonAtScreen = 45,
+    this.hollowChance = 0.75,
+    this.memoryChance = 0.15,
   });
 
   /// A wide-open bonus stretch full of coins starts every this many screens. 0 turns it off.
@@ -27,17 +27,8 @@ class GameTuning {
   /// coins). It doesn't shrink as the game speeds up, so wide spots keep coming.
   final double openSectionChance;
 
-  /// Chance that a stretch of ordinary tunnel holds a power-up.
+  /// Chance that a stretch of ordinary tunnel holds a shield (the only power-up).
   final double powerUpChance;
-
-  /// Boost multiplies the level speed. 1.25 turns 10 seconds per screen into 8.
-  final double boostFactor;
-
-  /// Slow multiplies the level speed. 0.8 is 20% slower.
-  final double slowFactor;
-
-  /// How long each timed power-up lasts. Freeze stops the level completely.
-  final double boostSeconds, slowSeconds, freezeSeconds;
 
   /// When the shield takes a hit, the level runs at this fraction of its speed for
   /// [shieldHitSlowSeconds], then catches back up in a quarter of that time.
@@ -46,6 +37,22 @@ class GameTuning {
   double get shieldRecoverSeconds => shieldHitSlowSeconds / 4;
 
   /// The run gets darker and more mystic (picture and music) as you climb, reaching full
-  /// darkness at this screen. Difficulty tops out at screen 40.
+  /// darkness at this screen. Difficulty tops out at screen 40. The realms along the way
+  /// (`GameState.realms`) are spaced out up to here.
   final double darkestAtScreen;
+
+  /// Past full darkness the run sinks further into the Void (the moon is eclipsed, the walls
+  /// go nearly black and eyes open in them), as deep as it goes at this screen.
+  final double deepestAtScreen;
+
+  /// Hollows (spiky shadow puffs that drift across the tunnel) start turning up at
+  /// [hollowsFromScreen] and are at their most common by [hollowsCommonAtScreen], when a
+  /// stretch of tunnel wide enough to hold one gets one with chance [hollowChance] (wide spots
+  /// too). 0 turns them off.
+  final int hollowsFromScreen, hollowsCommonAtScreen;
+  final double hollowChance;
+
+  /// Chance that a stretch of ordinary tunnel holds the next forgotten memory fragment of the
+  /// realm the run is in (at most one per realm per run).
+  final double memoryChance;
 }

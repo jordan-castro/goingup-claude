@@ -5,28 +5,31 @@ import 'package:flame/components.dart';
 
 import '../game_state.dart';
 import '../going_up_game.dart';
-import '../palette.dart';
 
-/// The rainbow trail, following the bunny's actual flight path (loops and dives included).
+/// The bunny's trail, in the stripes of the trail style being worn, following the bunny's
+/// actual flight path (loops and dives included).
 /// The path is softened, each stripe is offset along the path's normal so the ribbon keeps
 /// its width through turns, and it is drawn oldest piece first so newer loops pass over older
 /// ones. World coordinates: (x, -worldY).
 class Trail extends Component with HasGameReference<GoingUpGame> {
   Trail() : super(priority: 0);
 
-  static final List<Paint> _stripePaints = [
-    for (final color in Palette.rainbow)
+  final List<Paint> _stripePaints = [
+    for (var k = 0; k < 6; k++)
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = GameState.trailStripe + 0.9 // a little overlap hides seams between stripes
         ..strokeJoin = StrokeJoin.round
-        ..strokeCap = StrokeCap.butt
-        ..color = color,
+        ..strokeCap = StrokeCap.butt,
   ];
 
   @override
   void render(Canvas canvas) {
     final state = game.state;
+    final stripes = state.trailStyle.stripes;
+    for (var k = 0; k < 6; k++) {
+      _stripePaints[k].color = stripes[k];
+    }
     final src = state.trail;
     final alive = state.mode != GameMode.dead;
     final n = src.length + (alive ? 1 : 0);

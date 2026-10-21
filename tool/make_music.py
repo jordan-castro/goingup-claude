@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Generates goingUP's three music loops: assets/audio/day.wav, dusk.wav and night.wav.
+"""Generates goingUP's five music loops: assets/audio/day.wav, dusk.wav, creep.wav, night.wav
+and void.wav.
 
-The game plays all three together and crossfades between them as the run gets darker:
-  day   - bright plucked arpeggios, a bouncy bass and soft ticks
-  dusk  - a warm pad with a slow arpeggio
-  night - a low drone, a dark pad, wind and echoing bells
+The game plays them all together and crossfades between them as the climb goes up through
+its realms, from bright to broken:
+  day   - bright plucked arpeggios, a bouncy bass and soft ticks (the rainbow sky)
+  dusk  - a warm pad with a slow arpeggio (twilight)
+  creep - the lullaby again on a music box that's out of tune and running down: every note
+          wobbles, some are missing, some are a semitone wrong (ashfall and the hollow)
+  night - a low drone, a dark pad, wind and echoing bells (under the dark realms)
+  void  - a heartbeat, a dissonant drone that beats against itself, breaths of noise and
+          warped bells (the void)
 
 They share one tempo, one key and one chord progression (Am - F - C - G, two bars each) and are
 exactly the same length, so they stay in step. Every note's tail wraps around to the start of
@@ -182,10 +188,96 @@ def make_night():
     return normalise(buf)
 
 
+def wobbly(buf, start_s, f, amp, partials, tau, length_s, wow, seed):
+    """Like tone(), but the pitch wanders: a slow wow plus a little random flutter, as if the
+    music box were winding down. Tails wrap around the loop."""
+    rng = random.Random(seed)
+    s0 = round(start_s * SR)
+    n = round(length_s * SR)
+    flutter_rate = rng.uniform(4, 7)
+    for ratio, gain, decay_mult in partials:
+        if f * ratio >= SR / 2:
+            continue
+        d = math.exp(-1.0 / (tau * decay_mult * SR))
+        env, phase = 1.0, 0.0
+        for k in range(n):
+            t = (s0 + k) / SR
+            bend = 1 + wow * math.sin(TAU * t / LOOP_S * 3) + 0.004 * math.sin(TAU * flutter_rate * k / SR)
+            phase += TAU * f * ratio * bend / SR
+            e = min(1.0, k / 60) * env
+            env *= d
+            buf[(s0 + k) % N] += amp * gain * e * math.sin(phase)
+
+
+def make_creep():
+    """The day's arpeggio, slowed to quarter notes on a music box that has gone wrong."""
+    buf = [0.0] * N
+    rng = random.Random(21)
+    pattern = [0, 1, 2, 3, 2, 1, 0, 1]
+    for beat in range(LOOP_BEATS):
+        if rng.random() < 0.18:
+            continue  # a tooth of the comb is missing
+        root, tones = chord_at(beat)
+        notes = tones + [tones[0] + 12]
+        midi = notes[pattern[beat % 8]] + 24
+        if rng.random() < 0.15:
+            midi += rng.choice([-1, 1])  # wrong, by a semitone
+        detune = 2 ** (rng.uniform(-0.35, 0.35) / 12)
+        wobbly(buf, beat * BEAT + rng.uniform(0, 0.04), freq(midi) * detune, 0.2, BELL, 0.9, 2.8, 0.012, beat)
+    # a low, sour drone under it: the root and a flat second
+    for midi, amp in ((45, 0.1), (46, 0.06)):
+        f = loop_freq(freq(midi))
+        for k in range(N):
+            t = k / SR
+            buf[k] += amp * (0.6 + 0.4 * math.sin(TAU * t / LOOP_S * 2)) * math.sin(TAU * f * t)
+    # the creak of something heavy, twice a loop
+    y, rng = 0.0, random.Random(22)
+    for k in range(N):
+        y += 0.05 * (rng.uniform(-1, 1) - y)
+        swell = max(0.0, math.sin(TAU * k / N * 2 - 1)) ** 6
+        buf[k] += 0.35 * swell * y * (1 + math.sin(TAU * 31 * k / SR))
+    return normalise(buf)
+
+
+def make_void():
+    """A heartbeat, a drone that beats against itself, breaths of noise and warped bells."""
+    buf = [0.0] * N
+    # the heartbeat: lub-dub, 16 times a loop
+    for i in range(16):
+        start = i * LOOP_S / 16
+        for offset, amp in ((0.0, 0.6), (0.22, 0.4)):
+            tone(buf, start + offset, 46.0, amp, [(1, 1.0, 1.0), (2, 0.3, 0.5)], 0.008, 0.09, 0.5)
+    # a dissonant drone: A, a tritone above, and a hair-detuned A that beats against it
+    for f, amp in ((loop_freq(55.0), 0.16), (loop_freq(55.0 * 1.4142), 0.08), (loop_freq(55.0) + 2 / LOOP_S, 0.12)):
+        for k in range(N):
+            t = k / SR
+            buf[k] += amp * (math.sin(TAU * f * t) + 0.3 * math.sin(2 * TAU * f * t))
+    # breaths: noise that swells and is cut off, like a breath held then let go
+    rng = random.Random(31)
+    for i in range(4):
+        s0 = round((i + 0.3) * N / 4)
+        length = round(1.6 * SR)
+        y = 0.0
+        for k in range(length):
+            y += 0.12 * (rng.uniform(-1, 1) - y)
+            env = (k / length) ** 3
+            buf[(s0 + k) % N] += 0.5 * env * y
+    # bells, out of tune and crushed to a few steps
+    rng = random.Random(32)
+    for bar in range(LOOP_BEATS // 4):
+        if rng.random() < 0.5:
+            continue
+        midi = rng.choice([69, 70, 75, 76]) + 12
+        wobbly(buf, (bar * 4 + rng.choice([0, 1.5, 2.5])) * BEAT, freq(midi), 0.14, BELL, 1.4, 4.0, 0.03, 100 + bar)
+    buf = [round(x * 10) / 10 if i % 2 == 0 else x for i, x in enumerate(buf)]  # a grain of crushing
+    return normalise(buf)
+
+
 def main():
     out_dir = os.path.join("assets", "audio")
     os.makedirs(out_dir, exist_ok=True)
-    for name, make in (("day", make_day), ("dusk", make_dusk), ("night", make_night)):
+    for name, make in (("day", make_day), ("dusk", make_dusk), ("creep", make_creep), ("night", make_night),
+                       ("void", make_void)):
         write(os.path.join(out_dir, f"{name}.wav"), make())
 
 

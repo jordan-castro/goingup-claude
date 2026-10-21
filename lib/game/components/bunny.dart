@@ -7,8 +7,9 @@ import '../game_state.dart';
 import '../going_up_game.dart';
 import '../palette.dart';
 
-/// The bunny: a pixel-art body, two flapping wings and, while the shield is on, a bubble.
-/// Positioned at the bunny's anchor (sprite column 8, row 14) in world coordinates.
+/// The bunny: a pixel-art body, two flapping wings and, while the shield is on, a bubble, in
+/// the skin being worn. Positioned at the bunny's anchor (sprite column 8, row 14) in world
+/// coordinates.
 class BunnyView extends PositionComponent with HasGameReference<GoingUpGame>, HasVisibility {
   BunnyView() : super(priority: 5);
 
@@ -17,30 +18,38 @@ class BunnyView extends PositionComponent with HasGameReference<GoingUpGame>, Ha
   late final PositionComponent _sprite; // body and wings, moved together for the bob
   late final SpriteComponent _body;
   late final SpriteAnimationComponent _leftWing, _rightWing;
-  late final SpriteAnimation _slowFlapLeft, _fastFlapLeft, _slowFlapRight, _fastFlapRight;
+  late SpriteAnimation _slowFlapLeft, _fastFlapLeft, _slowFlapRight, _fastFlapRight;
   late final _ShieldBubble _shield;
   bool? _fastFlap;
+  String? _look; // the skin and memories the sprites show
 
   @override
   Future<void> onLoad() async {
-    final sprites = game.sprites;
-    SpriteAnimation flap(Image up, Image down, double step) =>
-        SpriteAnimation.spriteList([Sprite(up), Sprite(down)], stepTime: step);
-    _slowFlapLeft = flap(sprites.wingUpLeft, sprites.wingDownLeft, 0.25);
-    _fastFlapLeft = flap(sprites.wingUpLeft, sprites.wingDownLeft, 0.1);
-    _slowFlapRight = flap(sprites.wingUpRight, sprites.wingDownRight, 0.25);
-    _fastFlapRight = flap(sprites.wingUpRight, sprites.wingDownRight, 0.1);
-
     final wingSize = Vector2(7 * _bp, 10 * _bp);
-    _leftWing = SpriteAnimationComponent(animation: _slowFlapLeft, position: Vector2(-14 * _bp, -1 * _bp), size: wingSize);
-    _rightWing = SpriteAnimationComponent(animation: _slowFlapRight, position: Vector2(7 * _bp, -1 * _bp), size: wingSize);
-    _body = SpriteComponent(sprite: Sprite(sprites.bunny), position: Vector2(-8 * _bp, -14 * _bp), size: Vector2(16 * _bp, 25 * _bp));
+    _leftWing = SpriteAnimationComponent(position: Vector2(-14 * _bp, -1 * _bp), size: wingSize);
+    _rightWing = SpriteAnimationComponent(position: Vector2(7 * _bp, -1 * _bp), size: wingSize);
+    _body = SpriteComponent(position: Vector2(-8 * _bp, -14 * _bp), size: Vector2(16 * _bp, 25 * _bp));
     for (final c in <HasPaint>[_leftWing, _rightWing, _body]) {
       c.paint.filterQuality = FilterQuality.none; // keep the pixels square
     }
     _sprite = PositionComponent(children: [_leftWing, _rightWing, _body]);
     _shield = _ShieldBubble();
     addAll([_sprite, _shield]);
+    _wear(game.state.skin, game.state.memories.length);
+  }
+
+  /// Puts on [skin], marked by the [memories] Pip has got back.
+  void _wear(BunnySkin skin, int memories) {
+    _look = '${skin.id}/$memories';
+    final sprites = game.sprites.skin(skin, memories: memories);
+    SpriteAnimation flap(Image up, Image down, double step) =>
+        SpriteAnimation.spriteList([Sprite(up), Sprite(down)], stepTime: step);
+    _slowFlapLeft = flap(sprites.wingUpLeft, sprites.wingDownLeft, 0.25);
+    _fastFlapLeft = flap(sprites.wingUpLeft, sprites.wingDownLeft, 0.1);
+    _slowFlapRight = flap(sprites.wingUpRight, sprites.wingDownRight, 0.25);
+    _fastFlapRight = flap(sprites.wingUpRight, sprites.wingDownRight, 0.1);
+    _body.sprite = Sprite(sprites.bunny);
+    _fastFlap = null; // pick the wing animations again below
   }
 
   @override
@@ -48,6 +57,7 @@ class BunnyView extends PositionComponent with HasGameReference<GoingUpGame>, Ha
     final state = game.state;
     isVisible = state.mode != GameMode.dead;
     position.setValues(state.bunnyX, -state.worldY(state.bunnyY));
+    if ('${state.skinId}/${state.memories.length}' != _look) _wear(state.skin, state.memories.length);
 
     final title = state.mode == GameMode.title;
     _sprite.position.y = title ? math.sin(state.time * 3) * 6 : math.sin(state.time * 11) * 1.5;
