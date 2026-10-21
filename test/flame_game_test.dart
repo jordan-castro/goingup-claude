@@ -73,7 +73,7 @@ void main() {
 
   testWithGame<GoingUpGame>(
     'the picture eases toward the run\'s mood instead of jumping',
-    () => GoingUpGame(state: GameState(seed: 4, tuning: const GameTuning(darkestAtScreen: 1, bonusZoneEvery: 0))),
+    () => GoingUpGame(state: GameState(seed: 4, tuning: const GameTuning(realmEveryMeters: 2, bonusZoneEveryMeters: 0, hollowChance: 0))),
     (game) async {
       final state = game.state;
       game.press(Vector2(GameState.width / 2, state.height * 0.72), touch: false);
@@ -240,7 +240,7 @@ void main() {
   testWithGame<GoingUpGame>(
     'the deepest, most broken realm draws without trouble',
     () => GoingUpGame(
-        state: GameState(seed: 9, tuning: const GameTuning(darkestAtScreen: 1, deepestAtScreen: 1.5, bonusZoneEvery: 0))),
+        state: GameState(seed: 9, tuning: const GameTuning(realmEveryMeters: 2, voidDeepensOverMeters: 3, bonusZoneEveryMeters: 0))),
     (game) async {
       final state = game.state;
       game.press(Vector2(GameState.width / 2, state.height * 0.72), touch: false);
@@ -272,7 +272,7 @@ void main() {
       final sfx = game.sfx as SilentSfx;
       game.press(Vector2(GameState.width / 2, game.state.height * 0.72), touch: false);
       game.update(1 / 60);
-      expect(sfx.played.map((c) => c.sfx), [Sfx.takeoff, Sfx.memory]);
+      expect(sfx.played.map((c) => c.sfx), [Sfx.takeoff]);
       expect(game.state.sounds, isEmpty, reason: 'the game empties the list');
     },
   );

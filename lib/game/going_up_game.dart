@@ -15,6 +15,7 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'components/atmosphere.dart';
 import 'components/bunny.dart';
 import 'components/crash_marker.dart';
+import 'components/ghost.dart';
 import 'components/hollows.dart';
 import 'components/hud.dart';
 import 'components/pickups.dart';
@@ -23,6 +24,7 @@ import 'components/shop_screen.dart';
 import 'components/starfield.dart';
 import 'components/trail.dart';
 import 'components/tunnel.dart';
+import 'components/versus_screen.dart';
 import 'drawing.dart';
 import 'game_state.dart';
 import 'music.dart';
@@ -30,6 +32,8 @@ import 'palette.dart';
 import 'sfx.dart';
 import 'sprites.dart';
 import 'stages.dart';
+import 'versus/lan.dart';
+import 'versus/match.dart';
 
 /// The Flame side of goingUP: runs [state] every frame and shows (and plays) it.
 ///
@@ -38,14 +42,21 @@ import 'stages.dart';
 /// (between a 1.6 and 2.175 aspect, letterboxed beyond that), and the viewfinder scrolls with
 /// the distance flown.
 class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
-  GoingUpGame({GameState? state, GameMusic? music, GameSfx? sfx})
+  GoingUpGame({GameState? state, GameMusic? music, GameSfx? sfx, Lan? lan})
       : state = state ?? GameState(),
         music = music ?? SilentMusic(),
-        sfx = sfx ?? SilentSfx();
+        sfx = sfx ?? SilentSfx(),
+        lan = lan ?? createLan();
 
   final GameState state;
   final GameMusic music;
   final GameSfx sfx;
+
+  /// The local network, for racing a friend.
+  final Lan lan;
+
+  /// The race with a friend, while there is one.
+  VersusMatch? match;
 
   /// Mutes (or unmutes) the music and the sound effects together.
   bool get muted => music.muted;
@@ -76,6 +87,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   late final List<Component> _overlays; // field-space layers in the viewport, over the world
   final ShopScreen shop = ShopScreen();
   final MemoriesScreen book = MemoriesScreen();
+  final VersusScreen versusScreen = VersusScreen();
   final _rng = math.Random();
   int? _pointer; // the one pointer that steers; extra fingers are ignored
 
@@ -99,7 +111,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   }
 
   static double fieldHeightFor(Vector2 canvas) {
-    if (canvas.x <= 0 || canvas.y <= 0) return GameState.screenLength;
+    if (canvas.x <= 0 || canvas.y <= 0) return GameState.defaultHeight;
     final aspect = (canvas.y / canvas.x).clamp(GameState.minHeight / GameState.width, GameState.maxHeight / GameState.width);
     return GameState.width * aspect;
   }
@@ -111,7 +123,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   Future<void> onLoad() async {
     _sprites = Sprites();
     state.height = fieldHeightFor(size);
-    _overlays = [Atmosphere(), shop, book, Hud()]; // the HUD's speaker button stays on top
+    _overlays = [Atmosphere(), shop, book, versusScreen, Hud()]; // the HUD's speaker button stays on top
     camera = CameraComponent(
       world: world,
       viewport: FixedResolutionViewport(resolution: Vector2(GameState.width, state.height)),
@@ -119,7 +131,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
     );
     camera.viewfinder.anchor = Anchor.topLeft;
     camera.viewport.addAll(_overlays);
-    world.addAll([Trail(), Tunnel(), PickupLayer(), HollowLayer(), CrashMarkerView(), BunnyView()]);
+    world.addAll([Trail(), Tunnel(), PickupLayer(), HollowLayer(), CrashMarkerView(), GhostView(), BunnyView()]);
     _followState();
     if (!kIsWeb) _startSound(); // browsers only allow sound after a tap or click
   }
@@ -144,6 +156,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   @override
   void update(double dt) {
     state.update(dt);
+    match?.update(dt);
     for (final burst in state.bursts) {
       world.add(_particles(burst));
     }
@@ -251,12 +264,33 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   /// The shop button, bottom-right on the title and game-over screens (field units).
   Rect get shopButton => Rect.fromLTWH(GameState.width - 102, state.height - safeBottom - 44, 92, 32);
 
-  bool get showsShopButton => !shop.isOpen && !book.isOpen && (state.mode == GameMode.title || state.showGameOver);
+  bool get showsShopButton =>
+      !shop.isOpen && !book.isOpen && !versusScreen.isOpen && !state.versus && (state.mode == GameMode.title || state.showGameOver);
 
   /// The memories book's button, bottom-centre on the title and game-over screens.
   Rect get memoriesButton => Rect.fromLTWH((GameState.width - 132) / 2, state.height - safeBottom - 44, 132, 32);
 
   bool get showsMemoriesButton => showsShopButton;
+
+  /// The 2 PLAYERS button, top-right on the title screen, where there's a network.
+  Rect get versusButton => Rect.fromLTWH(GameState.width - 130, safeTop + 10, 120, 32);
+
+  bool get showsVersusButton => lan.supported && state.mode == GameMode.title && showsShopButton;
+
+  /// After a race: ask for a rematch, or leave the match.
+  Rect get rematchButton => Rect.fromLTWH((GameState.width - 240) / 2, state.height - safeBottom - 172, 240, 48);
+  Rect get leaveButton => Rect.fromLTWH((GameState.width - 140) / 2, state.height - safeBottom - 108, 140, 40);
+
+  bool get showsMatchButtons => match?.result != null && state.versus && state.showGameOver;
+
+  bool get showsRematchButton => showsMatchButtons && !match!.friendLeft && !match!.ready;
+
+  /// Leaves the race with a friend (the friend hears goodbye) and goes back to the title.
+  void leaveMatch() {
+    match?.leave();
+    match = null;
+    state.toTitle();
+  }
 
   /// Something in the shop that isn't owned yet costs no more than the coins in the bank.
   bool get canBuySomething =>
@@ -289,6 +323,25 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
       book.press(point);
       return false;
     }
+    if (versusScreen.isOpen) {
+      versusScreen.press(point);
+      return false;
+    }
+    if (showsVersusButton && versusButton.inflate(4).contains(point)) {
+      versusScreen.open();
+      sfx.play(const SoundCue(Sfx.click));
+      return false;
+    }
+    if (showsRematchButton && rematchButton.inflate(4).contains(point)) {
+      match!.setReady();
+      sfx.play(const SoundCue(Sfx.click));
+      return false;
+    }
+    if (showsMatchButtons && leaveButton.inflate(4).contains(point)) {
+      leaveMatch();
+      sfx.play(const SoundCue(Sfx.click));
+      return false;
+    }
     if (showsMemoriesButton && memoriesButton.inflate(4).contains(point)) {
       book.open();
       sfx.play(const SoundCue(Sfx.click));
@@ -315,6 +368,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
       state.continueMemory();
       return KeyEventResult.handled;
     }
+    if (versusScreen.isOpen && versusScreen.keyPressed(event)) return KeyEventResult.handled;
     if (event.logicalKey == LogicalKeyboardKey.escape && (shop.isOpen || book.isOpen)) {
       shop.close();
       book.close();
@@ -367,6 +421,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
 
   @override
   void onRemove() {
+    match?.leave();
     _sprites?.dispose();
     _sprites = null;
     music.dispose();

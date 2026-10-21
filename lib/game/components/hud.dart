@@ -11,32 +11,149 @@ import '../game_state.dart';
 import '../going_up_game.dart';
 import '../palette.dart';
 import '../pixel_font.dart';
+import '../versus/match.dart';
 
 /// Everything drawn over the world in field coordinates: the score panels, power-up timer,
 /// hints and toasts, plus the title and game-over screens and their buttons. Lives in the
-/// camera's viewport. Memories come back here too, as flashbacks over a frozen, sepia world. While the shop or the memories book
-/// is open, only the speaker button shows.
+/// camera's viewport. Memories come back here too, as flashbacks over a frozen, sepia world.
+/// In a race with a friend: the countdown, the friend's meters (and an arrow when they're off
+/// the screen), and who won. While the shop, the memories book or the two-player screens are
+/// open, only the speaker button shows.
 class Hud extends Component with HasGameReference<GoingUpGame> {
   static const double _w = GameState.width;
 
   @override
   void render(Canvas canvas) {
     final state = game.state;
-    if (!game.shop.isOpen && !game.book.isOpen) {
+    if (!game.shop.isOpen && !game.book.isOpen && !game.versusScreen.isOpen) {
       switch (state.mode) {
         case GameMode.title:
-          _title(canvas, state);
+          state.versus ? _countdown(canvas, state) : _title(canvas, state);
         case GameMode.playing:
           _panels(canvas, state);
         case GameMode.dead:
           _panels(canvas, state);
-          _gameOver(canvas, state);
+          state.versus ? _versusOver(canvas, state) : _gameOver(canvas, state);
       }
       _memory(canvas, state); // over everything else
     }
     if (game.showsMuteButton) _muteButton(canvas, game.muteButton, game.muted);
     if (game.showsShopButton) _shopButton(canvas, game.shopButton, state);
     if (game.showsMemoriesButton) _memoriesButton(canvas, game.memoriesButton, state);
+    if (game.showsVersusButton) _versusButton(canvas, game.versusButton);
+  }
+
+  /// "2 PLAYERS", for racing a friend.
+  void _versusButton(Canvas canvas, Rect rect) {
+    drawPanel(canvas, rect, edge: Palette.glimmer);
+    PixelFont.drawCentered(canvas, '2 PLAYERS', rect.center.dx, rect.top + 9, 2, Palette.glimmer);
+  }
+
+  /// Before a race: 3, 2, 1, each number popping in and shrinking, and the score so far.
+  void _countdown(Canvas canvas, GameState state) {
+    final match = game.match;
+    if (match == null || match.phase != MatchPhase.countdown) return;
+    final top = math.max(90.0, state.height * 0.16) + game.safeTop;
+    PixelFont.drawCentered(canvas, 'GET READY!', _w / 2, top, 4, Palette.sun, shadow: Palette.ink);
+    if (match.wins + match.losses > 0) {
+      PixelFont.drawCentered(canvas, 'WINS ${match.wins} - ${match.losses}', _w / 2, top + 44, 2, Palette.muted);
+    }
+    final left = match.countdown.clamp(0.0, VersusMatch.countdownSeconds);
+    final n = math.max(1, left.ceil());
+    final px = 14 + 10 * Curves.easeIn.transform(left - left.floor());
+    PixelFont.drawCentered(canvas, '$n', _w / 2, state.height * 0.42 - 3.5 * px, px, Palette.text, shadow: Palette.hot);
+    PixelFont.drawCentered(canvas, 'THE LAST ONE FLYING WINS', _w / 2, state.height * 0.62, 2, Palette.muted,
+        shadow: Palette.ink);
+  }
+
+  /// The friend's meters under the coins, "GO!" as the race starts, and an arrow at the edge
+  /// of the screen when the friend is out of sight.
+  void _friendPanel(Canvas canvas, GameState state, VersusMatch match, double y, double top) {
+    final value = '${match.friendMeters}M';
+    drawPanel(canvas, Rect.fromLTWH(10, y, PixelFont.widthOf('FRIEND $value', 2) + 16, 26), edge: Palette.glimmer);
+    PixelFont.draw(canvas, 'FRIEND ', 18, y + 6, 2, Palette.muted);
+    PixelFont.draw(canvas, value, 18 + 7 * 12, y + 6, 2, Palette.glimmer);
+    if (state.mode != GameMode.playing) return;
+
+    if (match.clock < 0.9) {
+      final fade = 1 - ramp(match.clock, 0.5, 0.9);
+      PixelFont.drawCentered(canvas, 'GO!', _w / 2, state.height * 0.36, 12, Palette.sun.withValues(alpha: fade),
+          shadow: Palette.hot.withValues(alpha: fade));
+    }
+
+    if (!match.ghostVisible) return;
+    final gy = state.screenY(match.ghostWy);
+    final above = gy < 0;
+    if (!above && gy <= state.height) return;
+    final meters = ((match.ghostWy - state.worldY(state.bunnyY)) / GameState.unitsPerMeter).round();
+    final x = match.ghostX.clamp(40.0, _w - 40);
+    final at = above ? top + 128 : state.height - game.safeBottom - 30;
+    final dir = above ? -1.0 : 1.0;
+    canvas.drawPath(
+        Path()
+          ..moveTo(x, at + dir * 10)
+          ..lineTo(x - 9, at)
+          ..lineTo(x + 9, at)
+          ..close(),
+        Paint()..color = Palette.glimmer.withValues(alpha: 0.85));
+    PixelFont.drawCentered(canvas, meters > 0 ? '+${meters}M' : '${meters}M', x, above ? at + 6 : at - 20, 2,
+        Palette.glimmer, shadow: Palette.ink);
+  }
+
+  /// After a race: who won, both players' meters, the score, and REMATCH or LEAVE.
+  void _versusOver(Canvas canvas, GameState state) {
+    final match = game.match;
+    if (match == null || !state.showGameOver) return;
+    final top = math.max(120.0, state.height * 0.12 + 30) + game.safeTop; // below the three panels
+    final result = match.result;
+    final (title, color) = switch (result) {
+      MatchResult.won => ('YOU WIN!', Palette.sun),
+      MatchResult.lost => ('YOU LOSE', Palette.hot),
+      MatchResult.draw => ('DRAW!', Palette.glimmer),
+      null => (state.spooked ? 'GOT YOU.' : 'BONK!', Palette.hot),
+    };
+    PixelFont.drawCentered(canvas, title, _w / 2, top, 6, color, shadow: Palette.ink);
+    final dots = '.' * ((state.time * 2).floor() % 4);
+    final why = match.friendLeft
+        ? 'YOUR FRIEND LEFT'
+        : result == null
+            ? 'WAITING FOR YOUR FRIEND$dots'
+            : state.endedByMatch
+                ? 'YOUR FRIEND CRASHED'
+                : result == MatchResult.draw
+                    ? 'YOU BOTH CRASHED AT ONCE'
+                    : 'YOUR FRIEND KEPT FLYING';
+    PixelFont.drawCentered(canvas, why, _w / 2, top + 56, 2, Palette.muted, shadow: Palette.ink);
+
+    final panelY = top + 84;
+    drawPanel(canvas, Rect.fromLTWH(40, panelY, _w - 80, 150));
+    for (final (x, label, meters, tint) in [
+      (_w * 0.3, 'YOU', state.meters, Palette.text),
+      (_w * 0.7, 'FRIEND', match.friendMeters, Palette.glimmer),
+    ]) {
+      PixelFont.drawCentered(canvas, label, x, panelY + 16, 2, Palette.muted);
+      PixelFont.drawCentered(canvas, '$meters', x, panelY + 40, 6, tint, shadow: Palette.hot);
+      PixelFont.drawCentered(canvas, 'METERS', x, panelY + 92, 2, Palette.muted);
+    }
+    PixelFont.drawCentered(canvas, 'WINS ${match.wins} - ${match.losses}', _w / 2, panelY + 122, 2, Palette.sun);
+    _coinLine(canvas, '+${_coinCount(state.runCoins)}', panelY + 166, Palette.sun);
+
+    if (!game.showsMatchButtons) return;
+    final rematch = game.rematchButton;
+    if (game.showsRematchButton) {
+      drawPanel(canvas, rematch, edge: Palette.sun);
+      PixelFont.drawCentered(canvas, 'REMATCH', rematch.center.dx, rematch.top + 10, 4, Palette.sun);
+      if (match.friendReady && blinkOn(state.time)) {
+        PixelFont.drawCentered(canvas, 'YOUR FRIEND WANTS A REMATCH!', _w / 2, rematch.top - 24, 2, Palette.glimmer,
+            shadow: Palette.ink);
+      }
+    } else if (match.ready) {
+      PixelFont.drawCentered(canvas, 'WAITING FOR YOUR FRIEND...', _w / 2, rematch.center.dy - 7, 2, Palette.muted,
+          shadow: Palette.ink);
+    }
+    final leave = game.leaveButton;
+    drawPanel(canvas, leave);
+    PixelFont.drawCentered(canvas, 'LEAVE', leave.center.dx, leave.top + 10, 3, Palette.text);
   }
 
   /// "MEMORIES", glowing with a blinking dot when one has come back since the book was opened.
@@ -196,12 +313,12 @@ class Hud extends Component with HasGameReference<GoingUpGame> {
   void _panels(Canvas canvas, GameState state) {
     final top = 10 + game.safeTop;
 
-    final number = '${state.screens}';
-    final labelW = PixelFont.widthOf('SCREENS', 2), numberW = PixelFont.widthOf(number, 6);
+    final number = '${state.meters}';
+    final labelW = PixelFont.widthOf('METERS', 2), numberW = PixelFont.widthOf(number, 6);
     final boxW = math.max(labelW, numberW) + 20;
     final boxX = _w - 10 - boxW;
     drawPanel(canvas, Rect.fromLTWH(boxX, top, boxW, 78));
-    PixelFont.draw(canvas, 'SCREENS', boxX + boxW - 10 - labelW, top + 10, 2, Palette.muted);
+    PixelFont.draw(canvas, 'METERS', boxX + boxW - 10 - labelW, top + 10, 2, Palette.muted);
     PixelFont.draw(canvas, number, boxX + boxW - 10 - numberW, top + 28, 6,
         state.popTime > 0 ? Palette.sun : Palette.text,
         shadow: Palette.hot);
@@ -210,7 +327,7 @@ class Hud extends Component with HasGameReference<GoingUpGame> {
     var leftY = top;
     if (state.best > 0) {
       const label = 'BEST ';
-      final value = '${state.best}';
+      final value = '${state.best}M';
       drawPanel(canvas, Rect.fromLTWH(10, leftY, PixelFont.widthOf(label + value, 2) + 16, 26));
       PixelFont.draw(canvas, label, 18, leftY + 6, 2, Palette.muted);
       PixelFont.draw(canvas, value, 18 + label.length * 12, leftY + 6, 2, Palette.sun);
@@ -220,8 +337,10 @@ class Hud extends Component with HasGameReference<GoingUpGame> {
     drawPanel(canvas, Rect.fromLTWH(10, leftY, 36 + PixelFont.widthOf(coinText, 2), 26));
     drawCoin(canvas, Offset(24, leftY + 13), 7);
     PixelFont.draw(canvas, coinText, 37, leftY + 6, 2, state.coinPopTime > 0 ? Palette.sun : Palette.text);
+    final match = game.match;
+    if (match != null && state.versus) _friendPanel(canvas, state, match, leftY + 32, top);
 
-    // right column, under the screen count: the shield
+    // right column, under the meters: the shield
     if (state.shield) {
       final rect = Rect.fromLTWH(_w - 40, top + 86, 30, 30);
       drawPanel(canvas, rect);
@@ -322,7 +441,7 @@ class Hud extends Component with HasGameReference<GoingUpGame> {
     final bottom = state.height - game.safeBottom;
     if (blinkOn(state.time)) _callToAction(canvas, state.touchUi ? 'TOUCH & HOLD' : 'PRESS & HOLD', bottom - 120);
     // best run and coins on one line, between the call to action and the buttons
-    final best = state.best > 0 ? 'BEST ${state.best}' : '';
+    final best = state.best > 0 ? 'BEST ${state.best}M' : '';
     final coins = state.coins > 0 ? '${state.coins}' : '';
     if (best.isNotEmpty || coins.isNotEmpty) {
       final gap = best.isNotEmpty && coins.isNotEmpty ? 24.0 : 0.0;
@@ -350,14 +469,14 @@ class Hud extends Component with HasGameReference<GoingUpGame> {
 
     final panelY = top + 110;
     drawPanel(canvas, Rect.fromLTWH(52, panelY, _w - 104, 236));
-    PixelFont.drawCentered(canvas, 'YOU FLEW PAST', _w / 2, panelY + 20, 2, Palette.muted);
-    PixelFont.drawCentered(canvas, '${state.screens}', _w / 2, panelY + 46, 10, Palette.text, shadow: Palette.hot);
-    PixelFont.drawCentered(canvas, 'SCREENS', _w / 2, panelY + 132, 2, Palette.muted);
+    PixelFont.drawCentered(canvas, 'YOU FLEW', _w / 2, panelY + 20, 2, Palette.muted);
+    PixelFont.drawCentered(canvas, '${state.meters}', _w / 2, panelY + 46, 10, Palette.text, shadow: Palette.hot);
+    PixelFont.drawCentered(canvas, 'METERS', _w / 2, panelY + 132, 2, Palette.muted);
     _coinLine(canvas, '+${_coinCount(state.runCoins)}', panelY + 160, Palette.sun);
-    if (state.newBest && state.screens > 0) {
+    if (state.newBest && state.meters > 0) {
       if (blinkOn(state.time)) PixelFont.drawCentered(canvas, 'NEW BEST!', _w / 2, panelY + 190, 4, Palette.sun);
     } else {
-      PixelFont.drawCentered(canvas, 'BEST ${state.best}', _w / 2, panelY + 198, 2, Palette.muted);
+      PixelFont.drawCentered(canvas, 'BEST ${state.best}M', _w / 2, panelY + 198, 2, Palette.muted);
     }
 
     if (state.canRetry && blinkOn(state.time)) {

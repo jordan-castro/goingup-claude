@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-/// Built-in 5x7 pixel font: A-Z, 0-9, a little punctuation (! ? & ' : . , - +), and the lowercase letters of
+/// Built-in 5x7 pixel font: A-Z, 0-9, a little punctuation (! ? & ' : . , - + % /), and the lowercase letters of
 /// "going". Other lowercase letters fall back to capitals. Each glyph advances 6 pixels.
 abstract final class PixelFont {
   // 7 rows of 5 cells per glyph, '#' = lit.
@@ -50,6 +50,8 @@ abstract final class PixelFont {
     ',': '.....................##....#...#...',
     '-': '................###................',
     '+': '.......#....#..#####..#....#.......',
+    '%': '##...##..#...#...#...#...#..##...##',
+    '/': '.........#...#...#...#...#.........',
     'g': '......#####...##...#.####....#.###.',
     'o': '...........###.#...##...##...#.###.',
     'i': '..#........##....#....#....#...###.',

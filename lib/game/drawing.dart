@@ -177,3 +177,50 @@ void drawFragment(Canvas canvas, Offset c, double t, double r) {
   final p = c + Offset(math.cos(a) * r * 1.6, math.sin(a) * r * 1.2);
   canvas.drawCircle(p, 1.6, Paint()..color = Palette.moon.withValues(alpha: 0.9));
 }
+
+/// A realm's own memory waiting in the tunnel: a small old photograph (two figures under a
+/// rainbow, washed to sepia) in a white frame, swaying and glowing warm. [r] is half its width.
+void drawPhoto(Canvas canvas, Offset c, double t, double r) {
+  final pulse = 0.5 + 0.5 * math.sin(t * 3);
+  for (final (k, a) in const [(2.3, 0.06), (1.7, 0.09), (1.25, 0.12)]) {
+    canvas.drawCircle(c, r * k, Paint()..color = Palette.sunsetAmber.withValues(alpha: a * (0.6 + 0.4 * pulse)));
+  }
+  canvas.save();
+  canvas.translate(c.dx, c.dy);
+  canvas.rotate(math.sin(t * 0.9) * 0.22);
+  final frame = Rect.fromCenter(center: Offset.zero, width: r * 2, height: r * 2.3);
+  canvas.drawRect(frame.shift(const Offset(1.5, 2)), Paint()..color = Palette.shade.withValues(alpha: 0.35));
+  canvas.drawRect(frame, Paint()..color = Palette.parchment);
+  final picture = Rect.fromLTRB(frame.left + r * 0.18, frame.top + r * 0.18, frame.right - r * 0.18, frame.bottom - r * 0.6);
+  canvas.drawRect(picture, Paint()..color = Palette.parchmentShade);
+  canvas.save();
+  canvas.clipRect(picture);
+  final band = picture.width * 0.07;
+  for (var k = 0; k < 6; k++) {
+    canvas.drawArc(
+        Rect.fromCircle(center: Offset(0, picture.bottom), radius: picture.width * 0.62 - k * band),
+        math.pi,
+        math.pi,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = band + 0.4
+          ..color = Color.lerp(Palette.rainbow[k], Palette.sepia, 0.55)!);
+  }
+  // two little bunnies, side by side
+  final figure = Paint()..color = Palette.sepia;
+  for (final dx in [-picture.width * 0.18, picture.width * 0.16]) {
+    final base = Offset(dx, picture.bottom);
+    canvas.drawOval(Rect.fromCenter(center: base + Offset(0, -r * 0.28), width: r * 0.42, height: r * 0.5), figure);
+    canvas.drawRect(Rect.fromLTWH(base.dx - r * 0.14, base.dy - r * 0.78, r * 0.09, r * 0.32), figure);
+    canvas.drawRect(Rect.fromLTWH(base.dx + r * 0.05, base.dy - r * 0.78, r * 0.09, r * 0.32), figure);
+  }
+  canvas.restore();
+  canvas.drawRect(
+      frame,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = Palette.sunsetAmber.withValues(alpha: 0.6 + 0.4 * pulse));
+  canvas.restore();
+}
