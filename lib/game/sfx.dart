@@ -34,7 +34,7 @@ class SilentSfx implements GameSfx {
 }
 
 /// Plays the clips in `assets/audio/sfx/` (made by `tool/make_sfx.py`) from small pools, so
-/// a quick run of coins can overlap without starting a new player each time.
+/// a sound can overlap itself without starting a new player each time.
 class PooledSfx implements GameSfx {
   static const _master = 0.7;
 
@@ -55,11 +55,7 @@ class PooledSfx implements GameSfx {
     Sfx.buy: ('buy', 0.8, 1),
     Sfx.nope: ('nope', 0.7, 1),
   };
-  static const _coinVolume = 0.2; // soft, there are a lot of them
-  static const _coinSteps = 5;
-
   final Map<Sfx, AudioPool> _pools = {};
-  final List<AudioPool> _coins = [];
   bool _loading = false;
 
   @override
@@ -70,9 +66,6 @@ class PooledSfx implements GameSfx {
     if (_loading) return;
     _loading = true;
     try {
-      for (var i = 1; i <= _coinSteps; i++) {
-        _coins.add(await FlameAudio.createPool('sfx/coin_$i.wav', maxPlayers: 3));
-      }
       for (final MapEntry(key: sfx, value: (file, _, overlap)) in _clips.entries) {
         _pools[sfx] = await FlameAudio.createPool('sfx/$file.wav', maxPlayers: overlap + 1);
       }
@@ -84,24 +77,14 @@ class PooledSfx implements GameSfx {
   @override
   void play(SoundCue cue) {
     if (muted) return;
-    final AudioPool? pool;
-    final double volume;
-    if (cue.sfx == Sfx.coin) {
-      pool = cue.step < _coins.length ? _coins[cue.step] : null;
-      volume = _coinVolume;
-    } else {
-      pool = _pools[cue.sfx];
-      volume = _clips[cue.sfx]!.$2;
-    }
-    pool?.start(volume: volume * _master).catchError((Object _) => () async {});
+    _pools[cue.sfx]?.start(volume: _clips[cue.sfx]!.$2 * _master).catchError((Object _) => () async {});
   }
 
   @override
   void dispose() {
-    for (final pool in [..._coins, ..._pools.values]) {
+    for (final pool in _pools.values) {
       pool.dispose().catchError((Object _) {});
     }
-    _coins.clear();
     _pools.clear();
   }
 }

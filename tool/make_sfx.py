@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Generates goingUP's sound effects into assets/audio/sfx/.
 
-  coin_1..coin_5  - a soft music-box tink; a quick run of coins climbs the A minor pentatonic
   shield          - an airy breath swelling over a low, warm hum
   bump            - a rubbery boing when the shield takes a hit
   crash           - a wooden bonk and a sad slide down
   takeoff         - a quick upward swoosh when a run starts
   ghost           - a soft sparkle when you fly past the last crash
-  milestone       - a two-note chime every 10 screens
+  milestone       - a two-note chime every 100 meters
   new_best        - a little fanfare
   hollow_pop      - a Hollow One torn apart by the shield
   realm           - a slow mystic chime when the climb enters a darker realm
@@ -114,18 +113,6 @@ def write(path, buf):
         out.setframerate(SR)
         out.writeframes(b"".join(struct.pack("<h", max(-32767, min(32767, int(x * 32767)))) for x in buf))
     print(f"wrote {path}: {len(buf) / SR:.2f} s")
-
-
-# A minor pentatonic, an octave and a bit up: A C D E G
-COIN_NOTES = [69, 72, 74, 76, 79]
-
-
-def make_coin(step):
-    """A single soft tink, like a music box comb plucked gently, muffled and short."""
-    buf = blank(0.4)
-    tone(buf, 0.0, freq(COIN_NOTES[step] + 12), 0.4, SOFT, 0.006, 0.12)
-    tone(buf, 0.0, freq(COIN_NOTES[step]), 0.15, SOFT, 0.01, 0.15)  # a hint of body underneath
-    return finish(buf, 0.5)
 
 
 def make_shield():
@@ -275,8 +262,7 @@ def make_nope():
 def main():
     out_dir = os.path.join("assets", "audio", "sfx")
     os.makedirs(out_dir, exist_ok=True)
-    makers = {f"coin_{i + 1}": (lambda i=i: make_coin(i)) for i in range(len(COIN_NOTES))}
-    makers.update(
+    makers = dict(
         shield=make_shield,
         bump=make_bump,
         crash=make_crash,

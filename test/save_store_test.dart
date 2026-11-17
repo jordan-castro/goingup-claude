@@ -10,14 +10,26 @@ void main() {
     expect(store.read().best, 0);
     expect(store.read().coins, 0);
 
-    await store.write(const SavedProgress(best: 23, coins: 310, lastScreens: 17, crashY: 12500.5, crashX: 143.25));
+    await store.write(const SavedProgress(best: 230, coins: 310, lastMeters: 170, crashY: 12500.5, crashX: 143.25));
     final again = await SaveStore.open();
     final saved = again.read();
-    expect(saved.best, 23);
+    expect(saved.best, 230);
     expect(saved.coins, 310);
-    expect(saved.lastScreens, 17);
+    expect(saved.lastMeters, 170);
     expect(saved.crashY, 12500.5);
     expect(saved.crashX, 143.25);
+  });
+
+  test('runs counted in screens by older versions come back in meters', () async {
+    SharedPreferences.setMockInitialValues({'best': 20, 'lastScreens': 11, 'coins': 5});
+    final saved = (await SaveStore.open()).read();
+    expect(saved.best, 130, reason: '20 screens of 720 units, at 110 units a meter');
+    expect(saved.lastMeters, 72);
+    expect(saved.coins, 5);
+
+    final store = await SaveStore.open();
+    await store.write(const SavedProgress(best: 140, lastMeters: 140));
+    expect((await SaveStore.open()).read().best, 140, reason: 'once saved in meters, the meters count');
   });
 
   test('shop items bought and worn, and memories found, survive a round trip', () async {

@@ -1,31 +1,37 @@
 /// Knobs for goingUP's level design and power-ups. Change the defaults here, or pass your own
-/// [GameTuning] to `Game` (the tests do that to make things happen sooner).
+/// [GameTuning] to `GameState` (the tests do that to make things happen sooner).
+///
+/// Distances are in in-game meters: the bunny is half a meter long.
 class GameTuning {
   const GameTuning({
-    this.bonusZoneEvery = const int.fromEnvironment('BONUS_ZONE_EVERY', defaultValue: 10),
-    this.bonusZoneSeconds = 3.5,
-    this.openSectionChance = 0.1,
+    this.bonusZoneEveryMeters = const int.fromEnvironment('BONUS_ZONE_EVERY_METERS', defaultValue: 130),
+    this.bonusZoneSeconds = 2,
+    this.openSectionChance = 0.04,
     this.powerUpChance = 0.05,
     this.shieldHitSlowFactor = 0.5,
     this.shieldHitSlowSeconds = 2,
-    this.darkestAtScreen = 45,
-    this.deepestAtScreen = 60,
-    this.hollowsFromScreen = 25,
-    this.hollowsCommonAtScreen = 45,
-    this.hollowChance = 0.75,
-    this.memoryChance = 0.15,
+    this.realmEveryMeters = const int.fromEnvironment('REALM_EVERY_METERS', defaultValue: 130),
+    this.voidDeepensOverMeters = 150,
+    this.hardestAtMeters = 260,
+    this.hollowsFromRealm = 2,
+    this.hollowsCommonAtRealm = 4,
+    this.hollowChance = 0.9,
+    this.hollowNestEveryMeters = 40,
+    this.milestoneEveryMeters = 100,
     this.turboSeconds = 35,
   });
 
-  /// A wide-open bonus stretch full of coins starts every this many screens. 0 turns it off.
-  /// Also settable per build: `flutter run --dart-define=BONUS_ZONE_EVERY=3`.
-  final int bonusZoneEvery;
+  /// A wide-open bonus stretch full of coins starts every this many meters, the first one half
+  /// as far in: with the realms as far apart, that's halfway through each realm, clear of the
+  /// memory forks. 0 turns it off.
+  /// Also settable per build: `flutter run --dart-define=BONUS_ZONE_EVERY_METERS=20`.
+  final int bonusZoneEveryMeters;
 
-  /// How long a bonus stretch lasts, in seconds at the speed you're flying when it's built.
+  /// How long a bonus stretch lasts, in seconds at the speed flown there.
   final double bonusZoneSeconds;
 
-  /// Chance that the next stretch of ordinary tunnel opens up wide (with a short line of
-  /// coins). It doesn't shrink as the game speeds up, so wide spots keep coming.
+  /// Chance that the next stretch of ordinary tunnel opens into a short wide pocket (with a
+  /// line of coins), at any speed. Kept low: the tunnel is mostly corridor.
   final double openSectionChance;
 
   /// Chance that a stretch of ordinary tunnel holds a shield (the only power-up).
@@ -37,25 +43,29 @@ class GameTuning {
   final double shieldHitSlowSeconds;
   double get shieldRecoverSeconds => shieldHitSlowSeconds / 4;
 
-  /// The run gets darker and more mystic (picture and music) as you climb, reaching full
-  /// darkness at this screen. Difficulty tops out at screen 40. The realms along the way
-  /// (`GameState.realms`) are spaced out up to here.
-  final double darkestAtScreen;
+  /// The realms (`GameState.realms`) start this far apart: Twilight at 1x, Ashfall at 2x,
+  /// The Hollow at 3x and The Void at 4x. The run is fully dark on reaching the Void.
+  /// Also settable per build: `flutter run --dart-define=REALM_EVERY_METERS=20`.
+  final int realmEveryMeters;
 
   /// Past full darkness the run sinks further into the Void (the moon is eclipsed, the walls
-  /// go nearly black and eyes open in them), as deep as it goes at this screen.
-  final double deepestAtScreen;
+  /// go nearly black and eyes open in them), as deep as it goes this many meters in.
+  final double voidDeepensOverMeters;
 
-  /// Hollows (spiky shadow puffs that drift across the tunnel) start turning up at
-  /// [hollowsFromScreen] and are at their most common by [hollowsCommonAtScreen], when a
-  /// stretch of tunnel wide enough to hold one gets one with chance [hollowChance] (wide spots
-  /// too). 0 turns them off.
-  final int hollowsFromScreen, hollowsCommonAtScreen;
+  /// The tunnel is at its narrowest and twistiest from here on.
+  final double hardestAtMeters;
+
+  /// The Hollow Ones turn up from the start of realm [hollowsFromRealm] (2 is Ashfall). They
+  /// only ever wait in open space, never in a narrow corridor: every [hollowNestEveryMeters]
+  /// the corridor opens into a short pocket where one waits, and a random wide pocket holds one
+  /// with a chance growing to [hollowChance] by the start of realm [hollowsCommonAtRealm], as
+  /// does the chance of a second one in the same pocket. A [hollowChance] of 0 turns them off.
+  final int hollowsFromRealm, hollowsCommonAtRealm;
   final double hollowChance;
+  final double hollowNestEveryMeters;
 
-  /// Chance that a stretch of ordinary tunnel holds the next forgotten memory fragment of the
-  /// realm the run is in (at most one per realm per run).
-  final double memoryChance;
+  /// "100 METERS!" every this many meters.
+  final int milestoneEveryMeters;
 
   /// A turbo from the shop jumps the run ahead to the speed it would have reached this many
   /// seconds later (35 takes the start from about 190 to about 420 units a second).

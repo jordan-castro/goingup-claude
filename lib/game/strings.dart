@@ -17,7 +17,7 @@ class Strings {
 
   // ---------- the run ----------
 
-  String get screens => _('SCREENS', 'PANTALLAS');
+  String get meters => _('METERS', 'METROS');
   String get best => _('BEST', 'RÉCORD');
   String get holdToSteer => _('HOLD TO STEER', 'MANTÉN PARA DIRIGIR');
   String get entering => _('ENTERING', 'ENTRANDO A');
@@ -28,7 +28,8 @@ class Strings {
         Toast.shieldSaved => _('SHIELD SAVED YOU!', '¡EL ESCUDO TE SALVÓ!'),
         Toast.shieldBroken => _('THE SHIELD BROKE!', '¡SE ROMPIÓ EL ESCUDO!'),
         Toast.newBest => _('NEW BEST!', '¡NUEVO RÉCORD!'),
-        Toast.milestone => _('$value SCREENS!', '¡$value PANTALLAS!'),
+        Toast.secondChance => _('SECOND CHANCE!', '¡OTRA OPORTUNIDAD!'),
+        Toast.milestone => _('$value METERS!', '¡$value METROS!'),
         Toast.theyFoundYou => _('THEY FOUND YOU.', 'TE ENCONTRARON.'),
         Toast.memory => _('A MEMORY RETURNED', 'VOLVIÓ UN RECUERDO'),
         Toast.turbo => _('TURBO!', '¡TURBO!'),
@@ -48,13 +49,69 @@ class Strings {
   String start({required bool touch}) => touch ? _('TOUCH & HOLD', 'TOCA Y MANTÉN') : _('PRESS & HOLD', 'MANTÉN PULSADO');
   String get bonk => _('BONK!', '¡PUM!');
   String get gotYou => _('GOT YOU.', 'TE ATRAPÉ.');
-  String get youFlewPast => _('YOU FLEW PAST', 'LLEGASTE A');
+  String get youFlew => _('YOU FLEW', 'VOLASTE');
   String get newBest => _('NEW BEST!', '¡NUEVO RÉCORD!');
   String get retry => _('HOLD TO RETRY', '¡OTRA VEZ!');
   String inRealm(int realm) => '${_('IN', 'EN')} ${realmName(realm)}';
   String coins(int n) => '$n ${n == 1 ? _('COIN', 'MONEDA') : _('COINS', 'MONEDAS')}';
   String get shop => _('SHOP', 'TIENDA');
   String get memories => _('MEMORIES', 'RECUERDOS');
+
+  // ---------- racing a friend ----------
+
+  String get twoPlayers => _('2 PLAYERS', '2 JUGADORES');
+  String get getReady => _('GET READY!', '¡PREPÁRATE!');
+  String wins(int wins, int losses) => '${_('WINS', 'VICTORIAS')} $wins - $losses';
+  String get lastOneFlyingWins => _('THE LAST ONE FLYING WINS', 'GANA QUIEN SIGA VOLANDO');
+  String get friend => _('FRIEND', 'AMIGO');
+  String get you => _('YOU', 'TÚ');
+  String get go => _('GO!', '¡YA!');
+  String get youWin => _('YOU WIN!', '¡GANASTE!');
+  String get youLose => _('YOU LOSE', 'PERDISTE');
+  String get draw => _('DRAW!', '¡EMPATE!');
+  String get friendLeft => _('YOUR FRIEND LEFT', 'TU AMIGO SE FUE');
+  String get waitingForFriend => _('WAITING FOR YOUR FRIEND', 'ESPERANDO A TU AMIGO');
+  String get friendCrashed => _('YOUR FRIEND CRASHED', 'TU AMIGO CHOCÓ');
+  String get bothCrashed => _('YOU BOTH CRASHED AT ONCE', 'CHOCARON A LA VEZ');
+  String get friendKeptFlying => _('YOUR FRIEND KEPT FLYING', 'TU AMIGO SIGUIÓ VOLANDO');
+  String get rematch => _('REMATCH', 'REVANCHA');
+  String get friendWantsRematch => _('YOUR FRIEND WANTS A REMATCH!', '¡TU AMIGO QUIERE LA REVANCHA!');
+  String get leave => _('LEAVE', 'SALIR');
+  String get hostAGame => _('HOST A GAME', 'CREAR PARTIDA');
+  String get joinAGame => _('JOIN A GAME', 'UNIRSE A PARTIDA');
+  String get typeAnAddress => _('TYPE AN ADDRESS', 'ESCRIBIR DIRECCIÓN');
+  String get join => _('JOIN', 'UNIRSE');
+  String get cancel => _('CANCEL', 'CANCELAR');
+  String get startRace => _('START', 'EMPEZAR');
+  String get ok => 'OK';
+  String get hosting => _('HOSTING', 'ANFITRIÓN');
+  String get waitingForAFriend => _('WAITING FOR A FRIEND', 'ESPERANDO A UN AMIGO');
+  String get lookingForGames => _('LOOKING FOR GAMES', 'BUSCANDO PARTIDAS');
+  String get joining => _('JOINING', 'UNIÉNDOSE');
+  String get sayingHello => _('SAYING HELLO...', 'SALUDANDO...');
+  String gameOf(String bunny) => _("$bunny'S GAME", 'PARTIDA DE $bunny');
+  List<String> get versusHow => _es
+      ? const ['VUELA EL MISMO TÚNEL QUE', 'UN AMIGO EN EL MISMO WI-FI.', 'NO PUEDEN CHOCAR ENTRE SÍ:',
+          'TU AMIGO ES UN FANTASMA.', '¡GANA QUIEN SIGA VOLANDO!']
+      : const ['FLY THE SAME TUNNEL AS A', 'FRIEND ON THE SAME WI-FI.', "YOU CAN'T BUMP INTO EACH",
+          "OTHER: THEY'RE A GHOST.", 'THE LAST ONE FLYING WINS!'];
+  List<String> get howToJoin => _es
+      ? const ['EN EL MISMO WI-FI, TU AMIGO', 'PULSA 2 JUGADORES Y LUEGO', 'UNIRSE A PARTIDA. O PUEDE', 'ESCRIBIR:']
+      : const ['ON THE SAME WI-FI, THEY', 'PRESS 2 PLAYERS, THEN', 'JOIN A GAME. OR THEY CAN', 'TYPE IN:'];
+  List<String> get howToHost => _es
+      ? const ['EL ANFITRIÓN PULSA', 'CREAR PARTIDA EN EL', 'MISMO WI-FI.']
+      : const ['THE HOST PRESSES', 'HOST A GAME ON THE', 'SAME WI-FI.'];
+  List<String> get cantListen => _es
+      ? const ['AQUÍ NO SE OYEN PARTIDAS:', 'ESCRIBE LA DIRECCIÓN.']
+      : const ["CAN'T LISTEN FOR GAMES HERE:", 'TYPE THE ADDRESS INSTEAD.'];
+  List<String> get waitingForHost => _es
+      ? const ['ESPERANDO QUE EL ANFITRIÓN', 'EMPIECE LA CARRERA']
+      : const ['WAITING FOR THE HOST', 'TO START THE RACE'];
+  List<String> get couldNotHost => _es
+      ? const ['NO SE PUDO CREAR LA PARTIDA.', '¿ESTÁ ENCENDIDO EL WI-FI?']
+      : const ['COULD NOT HOST A GAME.', 'IS THE WI-FI ON?'];
+  String get couldNotJoin => _('COULD NOT JOIN', 'NO SE PUDO UNIR A');
+  String get yourFriendLeft => _('YOUR FRIEND LEFT.', 'TU AMIGO SE FUE.');
 
   // ---------- the realms ----------
 
@@ -98,10 +155,37 @@ class Strings {
             'fire': 'FUEGO',
             'aurora': 'AURORA',
             'gold': 'ORO',
+            'peach': 'DURAZNO',
+            'storm': 'TORMENTA',
+            'lilac': 'LILA',
+            'ember': 'BRASA',
+            'comet': 'COMETA',
+            'guardian': 'GUARDIÁN',
+            'phantom': 'FANTASMA',
+            'sunset': 'OCASO',
+            'lavender': 'LAVANDA',
+            'mono': 'MONOCROMO',
+            'neon': 'NEÓN',
+            'magnet': 'IMÁN',
+            'lucky': 'SUERTE',
+            'phoenix': 'FÉNIX',
             'turbo': 'TURBO',
             'triple-shield': 'ESCUDO X3',
           }[item.id] ??
           item.name;
+
+  /// What a perk does, short enough for the shop's preview.
+  String perk(Perk perk) => !_es
+      ? perk.description
+      : switch (perk) {
+          Perk.none => '',
+          Perk.headStart => 'EMPIEZA 50% MÁS RÁPIDO',
+          Perk.startShield => 'EMPIEZA CON ESCUDO',
+          Perk.hollowProof => 'LOS HUECOS LO ATRAVIESAN',
+          Perk.magnet => 'ATRAE LAS MONEDAS',
+          Perk.doubleCoins => 'CADA MONEDA VALE DOBLE',
+          Perk.secondChance => 'PERDONA UN CHOQUE',
+        };
 
   /// What a power-up does, a few short lines for the shop's preview.
   List<String> powerUpHelp(Boost boost) => switch (boost) {

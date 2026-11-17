@@ -23,7 +23,7 @@ void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
   final mode = args.isNotEmpty ? args.first : 'title';
   final skip = args.skip(1).toSet();
-  final state = GameState(seed: 1, tuning: mode == 'dark' ? const GameTuning(darkestAtScreen: 1) : const GameTuning());
+  final state = GameState(seed: 1, tuning: mode == 'dark' ? const GameTuning(realmEveryMeters: 2) : const GameTuning());
   final game = _BenchGame(mode, skip, state, skip.contains('music') ? SilentMusic() : LayeredMusic());
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,

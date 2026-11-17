@@ -18,16 +18,20 @@ enum PowerUp { shield }
 
 /// What a message flashed on screen during a run says. The HUD puts it into words, in the
 /// player's language.
-enum Toast { shield, shieldSaved, shieldBroken, newBest, milestone, theyFoundYou, memory, turbo, tripleShield }
+enum Toast {
+  shield, shieldSaved, shieldBroken, secondChance, newBest, milestone, theyFoundYou, memory, turbo,
+  tripleShield,
+}
 
-/// Sound effects. Coins also carry a step: a quick run of them climbs the scale.
+/// Sound effects. Coins are silent: picking them up happens too often to want a sound.
 enum Sfx {
-  coin, shield, bump, crash, takeoff, ghost, milestone, newBest, hollowPop, realm, memory, glitch,
+  shield, bump, crash, takeoff, ghost, milestone, newBest, hollowPop, realm, memory, glitch,
   click, buy, nope, // shop buttons
 }
 
-/// One layer of the climb. Each is darker and more mystic than the last; a run enters it when
-/// its mood reaches [from] (so with the default tuning: screens 8, 18, 28 and 45).
+/// One layer of the climb. Each is darker and more mystic than the last. A run enters realm i
+/// at i x [GameTuning.realmEveryMeters]; [from] is the darkness ([GameState.mood]) it starts
+/// at, which the picture and music are tuned to.
 class Realm {
   const Realm(this.name, this.from);
 
@@ -37,13 +41,12 @@ class Realm {
 
 /// A sound for the view to play.
 class SoundCue {
-  const SoundCue(this.sfx, [this.step = 0]);
+  const SoundCue(this.sfx);
 
   final Sfx sfx;
-  final int step;
 
   @override
-  String toString() => step == 0 ? sfx.name : '${sfx.name}$step';
+  String toString() => sfx.name;
 }
 
 /// What survives between sessions.
@@ -51,7 +54,7 @@ class SavedProgress {
   const SavedProgress({
     this.best = 0,
     this.coins = 0,
-    this.lastScreens,
+    this.lastMeters,
     this.crashY,
     this.crashX,
     this.owned = const [],
@@ -63,14 +66,14 @@ class SavedProgress {
     this.tripleShields = 0,
   });
 
-  /// Most screens flown in one run.
+  /// Most meters flown in one run.
   final int best;
 
-  /// All coins ever collected.
+  /// Coins in the bank.
   final int coins;
 
-  /// Screens flown in the last run, and where (world height and x) it ended.
-  final int? lastScreens;
+  /// Meters flown in the last run, and where (world height and x) it ended.
+  final int? lastMeters;
   final double? crashY;
   final double? crashX;
 
@@ -104,23 +107,35 @@ class WallSample {
   final int id;
 }
 
-/// A coin, power-up or memory fragment floating in the tunnel, in world coordinates.
+/// A coin, power-up or memory floating in the tunnel, in world coordinates. Coins can move
+/// (the magnet pulls them in).
 class Pickup {
-  const Pickup.coin(this.x, this.wy, this.phase)
+  Pickup.coin(this.x, this.wy, this.phase)
       : powerUp = null,
-        memory = null;
-  const Pickup.powerUp(this.x, this.wy, PowerUp this.powerUp, this.phase) : memory = null;
-  const Pickup.memory(this.x, this.wy, Memory this.memory, this.phase) : powerUp = null;
+        memory = null,
+        group = null;
+  Pickup.powerUp(this.x, this.wy, PowerUp this.powerUp, this.phase)
+      : memory = null,
+        group = null;
 
-  final double x, wy, phase;
+  /// A memory: a realm's own memory (an old photograph) or one of its fragments (a torn shard
+  /// of the burrow wall). Pickups sharing a [group] are a choice: taking one loses the others.
+  Pickup.memory(this.x, this.wy, Memory this.memory, this.phase, {this.group}) : powerUp = null;
+
+  double x, wy;
+  final double phase;
   final PowerUp? powerUp;
   final Memory? memory;
+  final int? group;
 
   bool get isCoin => powerUp == null && memory == null;
+
+  /// A realm's own memory, as opposed to one of its fragments.
+  bool get isRealmMemory => memory?.arrival ?? false;
 }
 
-/// A hollow: a spiky shadow puff that drifts from side to side across the tunnel late in a
-/// run. Touching one ends the run, unless the shield takes the hit.
+/// One of the Hollow Ones: an evil copy of Pip that hops from side to side across a stretch of
+/// open space late in a run. Touching one ends the run, unless the shield takes the hit.
 class Hollow {
   Hollow(this.wy, this.centre, this.reach, this.rate, this.phase) : x = centre;
 
@@ -166,18 +181,27 @@ class _Control {
 /// the Flame game reads it every frame.
 ///
 /// Units: the play field is always [width] wide; its [height] follows the screen's shape.
-/// World y grows upward and [distance] is how far the field has scrolled.
+/// World y grows upward and [distance] is how far the field has scrolled. The bunny is half a
+/// meter long, which makes [unitsPerMeter].
+///
+/// The tunnel depends only on the run's seed and the height reached, never on how fast it was
+/// flown or the screen's shape, so two players given the same [runSeed] fly the same tunnel.
 class GameState {
   GameState({int? seed, this.tuning = const GameTuning(), this.onSave, this.onCrash, this.onBump})
       : _rng = math.Random(seed),
-        _fragmentRng = math.Random(seed == null ? null : seed + 7919) {
+        _forkRng = math.Random(seed == null ? null : seed + 7919) {
     _resetWorld();
   }
 
   static const double width = 400;
   static const double minHeight = 640, maxHeight = 870;
-  static const double screenLength = 720; // distance that counts as one "screen"
+  static const double defaultHeight = 720;
   static const double bunnyPixel = 2.2; // size of one bunny sprite pixel
+  static const double bunnyLength = 25 * bunnyPixel; // the whole sprite, ears to feet
+
+  /// The bunny is half a meter long.
+  static const double unitsPerMeter = bunnyLength / 0.5;
+
   static const double trailStripe = 4.4;
   static const double trailWidth = trailStripe * 6;
   static const double trailTailOffset = 8 * bunnyPixel; // trail leaves from the bunny's feet
@@ -190,30 +214,45 @@ class GameState {
   static const double _passage = 56; // room a hollow always leaves on one side
   static const double _hollowMinGap = 2 * (Hollow.radius + _passage) + 2;
   static const double _maxHollowDrift = 150; // fastest sideways speed, units per second
+  static const double _forkGap = 300, _forkLength = 420, _forkSpread = 95;
+  static const double _magnetReach = 110;
+  static const double _headStartFactor = 1.5;
   static const int _maxTrail = 900;
   static const int _maxBursts = 40;
   static const int _maxSounds = 16;
-  static const int coinSteps = 5;
-  static const double _coinRunGap = 0.5; // coins closer together than this climb the scale
 
   final GameTuning tuning;
-  final math.Random _rng;
-  final math.Random _fragmentRng; // separate, so fragments don't change the tunnel
+  math.Random _rng;
+  math.Random _forkRng; // separate: what a fork holds depends on the player, the tunnel mustn't
+
+  /// When set, every run starts its tunnel from this seed (a versus match: both players fly
+  /// the same tunnel). Otherwise each run carries on from the last.
+  int? runSeed;
 
   /// Called when something worth saving changes (a crash, a coin). Callers may batch writes.
   void Function(SavedProgress progress)? onSave;
   void Function()? onCrash;
 
-  /// Called when the shield takes a hit.
+  /// Called when the shield (or a second chance) takes a hit.
   void Function()? onBump;
 
   GameMode mode = GameMode.title;
   double time = 0, runTime = 0, distance = 0, speed = 110;
-  int screens = 0, best = 0;
+
+  /// Meters flown this run, and the most in any run.
+  int meters = 0, best = 0;
   bool newBest = false;
+  int? lastMeters;
 
   /// The run ended on a hollow rather than a wall.
   bool spooked = false;
+
+  /// Part of a versus match: there's no "last crash" ghost, and a new run starts only when the
+  /// match says so.
+  bool versus = false;
+
+  /// The run was stopped by the match (the other player crashed) rather than by a crash.
+  bool endedByMatch = false;
 
   /// The layers of the climb, from the bright start to the Void.
   static const realms = [
@@ -235,8 +274,8 @@ class GameState {
   /// run: they're found there and watched from the home screen.
   final Set<String> memories = {}, watched = {};
   bool newMemories = false;
-  final Set<int> _fragmentRealms = {}; // realms that got a fragment this run
-  int? lastScreens;
+  final Set<int> _forksPlanned = {}; // realms whose memory fork is in the tunnel this run
+  int _groupId = 0;
 
   /// Coins in the bank (collected, less what was spent in the shop), and the ones from this run.
   int coins = 0, runCoins = 0;
@@ -247,35 +286,47 @@ class GameState {
   BunnySkin get skin => Shop.skin(skinId);
   TrailStyle get trailStyle => Shop.trail(trailStyleId);
 
-  /// Hits the shield can still take: 1 from a shield in the tunnel, 3 from a triple shield
-  /// bought in the shop. 0 is no shield.
+  /// What the skin and trail being worn do.
+  bool hasPerk(Perk perk) => skin.perk == perk || trailStyle.perk == perk;
+
+  /// Hits the shield can still take: 1 from a shield in the tunnel (or the starting-shield
+  /// perk), 3 from a triple shield bought in the shop. 0 is no shield.
   int shieldHits = 0;
+  bool _tripleShield = false; // the shield on is a triple shield
   bool get shield => shieldHits > 0;
+  set shield(bool on) {
+    shieldHits = on ? math.max(shieldHits, 1) : 0;
+    if (!on) _tripleShield = false;
+  }
 
   /// Power-ups bought in the shop and not used yet. They're used during a run, from their
   /// buttons in the corner.
   int turbos = 0, tripleShields = 0;
 
+  /// The phoenix trail's forgiven crash, while it's still unused this run.
+  bool spareLife = false;
+
   /// Show touch wording ("touch and hold") instead of mouse wording.
   bool touchUi = false;
 
-  double bunnyX = width / 2, bunnyY = screenLength * 0.7;
-  double _targetX = width / 2, _targetY = screenLength * 0.7;
+  double bunnyX = width / 2, bunnyY = defaultHeight * 0.7;
+  double _targetX = width / 2, _targetY = defaultHeight * 0.7;
   bool holding = false;
   double _touchOffset = 0;
   double grace = 0, deadTime = 0, shake = 0, popTime = 0, coinPopTime = 0;
   Toast toast = Toast.shield;
 
-  /// The number in the toast (the screens for [Toast.milestone]).
+  /// The number in the toast (the meters for [Toast.milestone]).
   int toastValue = 0;
   double toastTime = 0;
 
   double _hitTime = -1; // seconds since the shield took a hit, or -1
 
   final List<_Control> _controls = [];
-  final List<_Control> _queued = []; // planned stretches (bonus zones, open sections)
+  final List<_Control> _queued = []; // planned stretches (bonus zones, open sections, forks)
   int _ctrlIdx = 0;
   double _nextZoneWy = double.infinity;
+  double _nextNestWy = double.infinity; // the next pocket where Hollow Ones wait
   final List<WallSample> walls = [];
   int _sampleId = 0;
   double _nextW = 0, _wobble = 0;
@@ -284,7 +335,7 @@ class GameState {
   int _trailId = 0;
   final List<Pickup> pickups = [];
   final List<Hollow> hollows = [];
-  double _hollowClock = 0; // drives the drift; stands still while the level is frozen
+  double _hollowClock = 0; // drives the hopping; stands still while the level is slowed
   bool _warnedHollows = false;
 
   /// Particle puffs waiting for the view to show them. The view empties this list.
@@ -292,18 +343,16 @@ class GameState {
 
   /// Sounds waiting for the view to play them. The view empties this list.
   final List<SoundCue> sounds = [];
-  int _coinStep = 0;
-  double _lastCoinTime = -1;
 
   double? _crashY, _crashX;
   CrashMarker? marker;
 
-  double _height = screenLength;
+  double _height = defaultHeight;
   double get height => _height;
   set height(double value) => _height = value.clamp(minHeight, maxHeight);
 
   bool get showGameOver => mode == GameMode.dead && deadTime >= overDelay;
-  bool get canRetry => mode == GameMode.dead && deadTime > retryDelay;
+  bool get canRetry => mode == GameMode.dead && deadTime > retryDelay && !versus;
 
   /// Field y (0 at the top of the screen) of world height [wy].
   double screenY(double wy) => height - (wy - distance);
@@ -313,27 +362,63 @@ class GameState {
 
   double get tailWorldY => worldY(bunnyY + trailTailOffset);
 
+  /// World height where realm [r] begins.
+  double realmStart(int r) => r * tuning.realmEveryMeters * unitsPerMeter;
+
+  /// How far along the realms world height [wy] is: realm i begins at i.
+  double _realmProgress(double wy) => wy / unitsPerMeter / tuning.realmEveryMeters;
+
   /// How far the run has sunk into darkness: 0 is the bright start (and the title screen),
-  /// 1 is full night at [GameTuning.darkestAtScreen]. Keeps its value through the game-over
-  /// screen and drops back to 0 when a new run starts.
+  /// 1 is full night on reaching the Void. Realm i begins when it reaches `realms[i].from`;
+  /// in between it grows steadily. Keeps its value through the game-over screen and drops
+  /// back to 0 when a new run starts.
   double get mood {
     if (mode == GameMode.title) return 0;
-    return (distance / (screenLength * tuning.darkestAtScreen)).clamp(0.0, 1.0);
+    final r = _realmProgress(distance);
+    if (r >= realms.length - 1) return 1;
+    final i = r.floor();
+    return _lerp(realms[i].from, realms[i + 1].from, r - i);
   }
 
-  /// How far past full darkness the run has sunk into the Void: 0 until
-  /// [GameTuning.darkestAtScreen], 1 at [GameTuning.deepestAtScreen]. Like [mood], it keeps its
-  /// value through the game-over screen and drops back to 0 when a new run starts.
+  /// How far past full darkness the run has sunk into the Void: 0 until the Void, 1 once
+  /// [GameTuning.voidDeepensOverMeters] in. Like [mood], it keeps its value through the
+  /// game-over screen and drops back to 0 when a new run starts.
   double get deep {
     if (mode == GameMode.title) return 0;
-    final from = tuning.darkestAtScreen, to = tuning.deepestAtScreen;
-    final screensFlown = distance / screenLength;
-    if (to <= from) return screensFlown >= from ? 1 : 0;
-    return ((screensFlown - from) / (to - from)).clamp(0.0, 1.0);
+    final into = distance / unitsPerMeter - (realms.length - 1) * tuning.realmEveryMeters;
+    if (tuning.voidDeepensOverMeters <= 0) return into >= 0 ? 1 : 0;
+    return (into / tuning.voidDeepensOverMeters).clamp(0.0, 1.0);
   }
 
   /// Level speed before a shield hit slows it: slow at first, then faster.
-  double get baseSpeed => math.min(_maxSpeed, _baseSpeed + 4 * runTime + 0.075 * runTime * runTime);
+  double get baseSpeed => baseSpeedAfter(runTime);
+
+  static double baseSpeedAfter(double seconds) =>
+      math.min(_maxSpeed, _baseSpeed + 4 * seconds + 0.075 * seconds * seconds);
+
+  /// Seconds of flying before the base speed reaches [speed].
+  static double _secondsToSpeed(double speed) {
+    final c = _baseSpeed - math.min(speed, _maxSpeed);
+    return (-4 + math.sqrt(16 - 4 * 0.075 * c)) / (2 * 0.075);
+  }
+
+  /// The base speed a run normally has by the time it reaches world height [wy]: the tunnel
+  /// is built for that, so it's the same whoever flies it and however fast.
+  static double expectedSpeedAt(double wy) {
+    double flown(double t) => _baseSpeed * t + 2 * t * t + 0.025 * t * t * t;
+    final top = _secondsToSpeed(_maxSpeed), topDistance = flown(top);
+    if (wy >= topDistance) return _maxSpeed;
+    var lo = 0.0, hi = top;
+    for (var i = 0; i < 40; i++) {
+      final mid = (lo + hi) / 2;
+      if (flown(mid) < wy) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return baseSpeedAfter((lo + hi) / 2);
+  }
 
   /// How much a shield hit is scaling the level speed right now.
   double get levelFactor => _hitFactor;
@@ -349,7 +434,7 @@ class GameState {
   SavedProgress get progress => SavedProgress(
         best: best,
         coins: coins,
-        lastScreens: lastScreens,
+        lastMeters: lastMeters,
         crashY: _crashY,
         crashX: _crashX,
         owned: owned.toList()..sort(),
@@ -364,7 +449,7 @@ class GameState {
   void restore(SavedProgress saved) {
     best = math.max(best, saved.best);
     coins += saved.coins; // keeps any coins picked up before the save finished loading
-    lastScreens ??= saved.lastScreens;
+    lastMeters ??= saved.lastMeters;
     if (_crashY == null && saved.crashY != null && saved.crashX != null) {
       _crashY = saved.crashY;
       _crashX = saved.crashX;
@@ -381,7 +466,7 @@ class GameState {
 
   // ---------- memories ----------
 
-  /// Brings back [memory] if it was forgotten: a sound and a word on screen, and it's saved to
+  /// Brings back [memory] if it was forgotten: a chime and a word on screen, and it's saved to
   /// be watched later in the memories book. The run goes on.
   void _remember(Memory memory) {
     if (!memories.add(memory.id)) return;
@@ -396,16 +481,38 @@ class GameState {
     if (memories.contains(memory.id) && watched.add(memory.id)) onSave?.call(progress);
   }
 
-  /// Now and then the next forgotten fragment of the realm the run is in drifts close to one
-  /// wall of a stretch of tunnel: hard to reach, but never through a wall. At most one per
-  /// realm per run.
-  void _maybeAddFragment(double wy, double centre, double gap) {
-    if (_fragmentRealms.contains(realm)) return;
-    final next = Memories.fragmentsOf(realm).where((m) => !memories.contains(m.id)).firstOrNull;
-    if (next == null || _fragmentRng.nextDouble() >= tuning.memoryChance) return;
-    _fragmentRealms.add(realm);
-    final side = _fragmentRng.nextBool() ? 1.0 : -1.0;
-    pickups.add(Pickup.memory(centre + side * math.max(0.0, gap / 2 - 30), wy, next, _fragmentRng.nextDouble() * 6));
+  /// Where realm [r]'s memory fork is: a little after the realm begins (so its "ENTERING"
+  /// card comes first), or early in the run for the first realm.
+  double _forkWy(int r) => r == 0 ? 25 * unitsPerMeter : realmStart(r) + 15 * unitsPerMeter;
+
+  /// Realm [r]'s memory fork: the tunnel opens wide, with the realm's own memory on one side
+  /// and its next forgotten fragment on the other. Taking one loses the other; both can be
+  /// left alone. Its walls are the same for everyone; what it holds depends on what this
+  /// player has already remembered.
+  void _planFork(_Control prev, int r) {
+    _forksPlanned.add(r);
+    final a = math.max(_forkWy(r), prev.wy + 320);
+    const centre = width / 2;
+    _queued.addAll([_Control(a, centre, _forkGap), _Control(a + _forkLength, centre, _forkGap)]);
+    // the next bonus stretch keeps its distance, so the two don't run together
+    _nextZoneWy = math.max(_nextZoneWy, a + _forkLength + 25 * unitsPerMeter);
+    _nextNestWy = math.max(_nextNestWy, a + _forkLength + 15 * unitsPerMeter);
+    for (var i = 0; i < 3; i++) {
+      final wy = a + 40 + i * 40;
+      pickups.add(Pickup.coin(centre, wy, wy * 0.05));
+    }
+    final arrival = Memories.arrivalOf(r);
+    final realmMemory = memories.contains(arrival.id) ? null : arrival;
+    final fragment = Memories.fragmentsOf(r).where((m) => !memories.contains(m.id)).firstOrNull;
+    final wy = a + _forkLength * 0.55;
+    final group = ++_groupId;
+    if (realmMemory != null && fragment != null) {
+      final side = _forkRng.nextBool() ? 1.0 : -1.0;
+      pickups.add(Pickup.memory(centre + side * _forkSpread, wy, realmMemory, 0, group: group));
+      pickups.add(Pickup.memory(centre - side * _forkSpread, wy, fragment, 2, group: group));
+    } else if ((realmMemory ?? fragment) case final only?) {
+      pickups.add(Pickup.memory(centre, wy, only, 0, group: group));
+    }
   }
 
   // ---------- power-ups from the shop ----------
@@ -428,6 +535,7 @@ class GameState {
     if (mode != GameMode.playing || tripleShields <= 0 || shieldHits >= 3) return false;
     tripleShields--;
     shieldHits = 3;
+    _tripleShield = true;
     _showToast(Toast.tripleShield);
     _sound(Sfx.shield);
     _burst(bunnyX, worldY(bunnyY), 26, const [Palette.shield, Palette.text], 60, 240);
@@ -496,7 +604,7 @@ class GameState {
     _touchOffset = touch ? 70 : 0;
     holding = true;
     pointerMove(x, y);
-    if (mode == GameMode.title || canRetry) _startGame();
+    if (!versus && (mode == GameMode.title || canRetry)) _startGame();
   }
 
   void pointerMove(double x, double y) {
@@ -507,12 +615,49 @@ class GameState {
 
   void pointerUp() => holding = false;
 
+  // ---------- versus ----------
+
+  /// Starts a versus run on [seed]: both players fly the same tunnel. A hold that began
+  /// during the countdown steers straight away.
+  void startVersusRun(int seed) {
+    versus = true;
+    runSeed = seed;
+    _startGame();
+  }
+
+  /// The match is over while this bunny is still flying (the other one crashed): the run
+  /// stops here, without a crash.
+  void endRunForMatch() {
+    if (mode != GameMode.playing) return;
+    mode = GameMode.dead;
+    endedByMatch = true;
+    deadTime = 0;
+    holding = false;
+    _finishRun();
+  }
+
+  /// Back to the title screen's calm tunnel: when leaving a match, or (with [versus]) while
+  /// counting down to the next race.
+  void toTitle({bool versus = false}) {
+    this.versus = versus;
+    if (!versus) runSeed = null;
+    endedByMatch = false;
+    mode = GameMode.title;
+    distance = 0;
+    realm = 0;
+    realmCardTime = 0;
+    shield = false;
+    marker = null;
+    trail.clear();
+    _resetWorld();
+  }
+
   // ---------- power-ups ----------
 
   void applyPowerUp(PowerUp p) {
     switch (p) {
       case PowerUp.shield:
-        shieldHits = math.max(shieldHits, 1);
+        shield = true; // never weakens a triple shield
         _showToast(Toast.shield);
     }
   }
@@ -534,7 +679,7 @@ class GameState {
     switch (mode) {
       case GameMode.playing:
         _updateEffects(h);
-        runTime += h * levelFactor; // the speed ramp pauses while the level is frozen
+        runTime += h * levelFactor; // the speed ramp pauses while the level is slowed
         speed = baseSpeed * levelFactor;
       case GameMode.title:
         speed = 110;
@@ -556,7 +701,7 @@ class GameState {
     }
 
     _updateTrail();
-    _updatePickups();
+    _updatePickups(h);
     _updateHollows(h);
 
     final m = marker;
@@ -570,30 +715,25 @@ class GameState {
     }
 
     if (mode == GameMode.playing) {
-      final s = (distance / screenLength).floor();
-      if (s != screens) {
-        screens = s;
-        _onNewScreen(s);
+      final flown = (distance / unitsPerMeter).floor();
+      if (flown != meters) {
+        meters = flown;
+        _onNewMeter(flown);
       }
-      if (realm + 1 < realms.length && mood >= realms[realm + 1].from) {
+      if (realm + 1 < realms.length && distance >= realmStart(realm + 1)) {
         realm++;
         realmCardTime = realmCardSeconds;
         _sound(Sfx.realm);
-        _remember(Memories.arrivalOf(realm));
       }
       if (grace > 0) {
         grace -= h;
       } else if (_hitsWall()) {
-        if (shield) {
-          _absorbHit();
-        } else {
+        if (!_survive()) {
           _die();
           return;
         }
       } else if (_touchedHollow() case final hollow?) {
-        if (shield) {
-          _absorbHit(hollow: hollow);
-        } else {
+        if (!_survive(hollow: hollow)) {
           _die(spooked: true);
           return;
         }
@@ -614,10 +754,27 @@ class GameState {
     }
   }
 
-  /// The shield soaks up the hit: the bunny gets a moment to steer clear, and the level slows
-  /// down before catching back up. A wall puts the bunny back inside the gap; a hollow pops.
-  void _absorbHit({Hollow? hollow}) {
-    shieldHits--;
+  /// A hit that the shield (or the phoenix trail's second chance) can soak up. Returns false
+  /// if nothing could, and the run ends.
+  bool _survive({Hollow? hollow}) {
+    if (shield) {
+      shieldHits--;
+      final broke = _tripleShield && shieldHits == 0;
+      if (shieldHits == 0) _tripleShield = false;
+      _absorbHit(hollow: hollow, message: broke ? Toast.shieldBroken : Toast.shieldSaved);
+      return true;
+    }
+    if (spareLife) {
+      spareLife = false;
+      _absorbHit(hollow: hollow, message: Toast.secondChance);
+      return true;
+    }
+    return false;
+  }
+
+  /// The hit is soaked up: the bunny gets a moment to steer clear, and the level slows down
+  /// before catching back up. A wall puts the bunny back inside the gap; a hollow pops.
+  void _absorbHit({Hollow? hollow, required Toast message}) {
     _hitTime = 0;
     grace = 1.2;
     shake = 0.5;
@@ -631,12 +788,12 @@ class GameState {
       _burst(hollow.x, hollow.wy, 30, const [Palette.hollow, Palette.hollowRim, Palette.shield], 60, 300);
       _sound(Sfx.hollowPop);
     }
-    _showToast(shieldHits > 0 ? Toast.shieldSaved : Toast.shieldBroken);
+    _showToast(message);
     onBump?.call();
   }
 
-  /// Hollows drift with the level's clock, so freeze stops them too, and stay clear of the
-  /// walls. Ones that have scrolled away are dropped.
+  /// Hollows hop with the level's clock, so a slowed level slows them too, and stay clear of
+  /// the walls. Ones that have scrolled away are dropped.
   void _updateHollows(double h) {
     _hollowClock += h * (mode == GameMode.playing ? levelFactor : 1);
     for (var i = hollows.length - 1; i >= 0; i--) {
@@ -661,8 +818,9 @@ class GameState {
     }
   }
 
-  /// The hollow the bunny's head or body is touching, if any.
+  /// The hollow the bunny's head or body is touching, if any. The phantom skin is never caught.
   Hollow? _touchedHollow() {
+    if (hasPerk(Perk.hollowProof)) return null;
     for (final g in hollows) {
       final gy = screenY(g.wy);
       if ((gy - bunnyY).abs() > 60) continue;
@@ -694,49 +852,77 @@ class GameState {
     if (drop > 0) trail.removeRange(0, drop);
   }
 
-  void _updatePickups() {
+  void _updatePickups(double h) {
     final bunnyCentre = bunnyY + 2;
-    for (var i = pickups.length - 1; i >= 0; i--) {
-      final p = pickups[i];
-      final sy = screenY(p.wy);
+    final magnet = mode == GameMode.playing && hasPerk(Perk.magnet);
+    final pull = 1 - math.exp(-9 * h);
+    final taken = <Pickup>[];
+    for (final p in pickups) {
+      if (taken.contains(p)) continue; // lost with the choice taken just now
+      var sy = screenY(p.wy);
       if (sy > height + 40) {
-        pickups.removeAt(i);
+        taken.add(p); // scrolled away
         continue;
       }
       if (mode != GameMode.playing) continue;
+      if (magnet && p.isCoin) {
+        final dx = bunnyX - p.x, dy = bunnyCentre - sy;
+        if (dx * dx + dy * dy < _magnetReach * _magnetReach) {
+          p.x += dx * pull;
+          p.wy -= dy * pull; // world y grows upward
+          sy = screenY(p.wy);
+        }
+      }
       final reach = p.isCoin ? 22.0 : 26.0;
       final dx = p.x - bunnyX, dy = sy - bunnyCentre;
       if (dx * dx + dy * dy > reach * reach) continue;
-      pickups.removeAt(i);
-      final power = p.powerUp, memory = p.memory;
-      if (memory != null) {
-        _burst(p.x, p.wy, 24, const [Palette.glimmer, Palette.moon, Palette.runeViolet], 50, 230);
-        _remember(memory);
-      } else if (power == null) {
-        coins++;
-        runCoins++;
-        coinPopTime = 0.2;
-        _burst(p.x, p.wy, 6, const [Palette.coin, Palette.text], 40, 160);
-        _coinStep = time - _lastCoinTime < _coinRunGap ? math.min(_coinStep + 1, coinSteps - 1) : 0;
-        _lastCoinTime = time;
-        _sound(Sfx.coin, _coinStep);
-        onSave?.call(progress);
-      } else {
-        applyPowerUp(power);
-        _burst(p.x, p.wy, 16, [Palette.powerUp(power), Palette.text], 60, 240);
-        _sound(switch (power) {
-          PowerUp.shield => Sfx.shield,
-        });
+      taken.add(p);
+      _take(p, taken);
+    }
+    pickups.removeWhere(taken.contains);
+  }
+
+  void _take(Pickup p, List<Pickup> taken) {
+    final power = p.powerUp, memory = p.memory;
+    if (memory != null) {
+      _burst(p.x, p.wy, 24, const [Palette.glimmer, Palette.moon, Palette.runeViolet], 50, 230);
+      // a choice: the ones not taken fade away
+      for (final other in pickups) {
+        if (other != p && other.group != null && other.group == p.group) {
+          taken.add(other);
+          _burst(other.x, other.wy, 12, const [Palette.muted, Palette.panelEdge], 30, 120);
+        }
       }
+      _remember(memory);
+    } else if (power == null) {
+      final value = hasPerk(Perk.doubleCoins) ? 2 : 1;
+      coins += value;
+      runCoins += value;
+      coinPopTime = 0.2;
+      _burst(p.x, p.wy, 6, const [Palette.coin, Palette.text], 40, 160);
+      onSave?.call(progress);
+    } else {
+      applyPowerUp(power);
+      _burst(p.x, p.wy, 16, [Palette.powerUp(power), Palette.text], 60, 240);
+      _sound(switch (power) {
+        PowerUp.shield => Sfx.shield,
+      });
     }
   }
 
   void _startGame() {
+    final seed = runSeed;
+    if (seed != null) {
+      _rng = math.Random(seed);
+      _forkRng = math.Random(seed + 7919);
+    }
     mode = GameMode.playing;
-    runTime = 0;
+    endedByMatch = false;
+    // the comet skin skips the slow start: the run begins at half again the starting speed
+    runTime = hasPerk(Perk.headStart) ? _secondsToSpeed(_baseSpeed * _headStartFactor) : 0;
     distance = 0;
-    speed = _baseSpeed;
-    screens = 0;
+    speed = baseSpeed;
+    meters = 0;
     runCoins = 0;
     grace = 1.0;
     bunnyX = width / 2;
@@ -750,15 +936,14 @@ class GameState {
     _warnedHollows = false;
     realm = 0;
     realmCardTime = 0;
-    _fragmentRealms.clear();
-    shieldHits = 0;
+    shieldHits = hasPerk(Perk.startShield) ? 1 : 0;
+    _tripleShield = false;
+    spareLife = hasPerk(Perk.secondChance);
     _hitTime = -1;
-    _coinStep = 0;
-    _lastCoinTime = -1;
+    _hollowClock = 0;
     _sound(Sfx.takeoff);
-    _remember(Memories.arrivalOf(0)); // only the very first run: "I woke up flying"
     final cy = _crashY, cx = _crashX;
-    marker = cy != null && cx != null ? CrashMarker(cy, cx) : null;
+    marker = !versus && cy != null && cx != null ? CrashMarker(cy, cx) : null;
     _resetWorld();
   }
 
@@ -771,24 +956,29 @@ class GameState {
     _crashX = bunnyX;
     _burst(bunnyX, _crashY!, 70, trailStyle.stripes, 60, 520);
     _sound(Sfx.crash);
-    lastScreens = screens;
-    newBest = screens > best;
-    if (newBest) best = screens;
-    onSave?.call(progress);
+    _finishRun();
     onCrash?.call();
   }
 
-  void _onNewScreen(int s) {
-    popTime = 0.25;
-    if (best > 0 && s == best + 1) {
+  void _finishRun() {
+    lastMeters = meters;
+    newBest = meters > best;
+    if (newBest) best = meters;
+    onSave?.call(progress);
+  }
+
+  void _onNewMeter(int m) {
+    final every = tuning.milestoneEveryMeters;
+    if (best > 0 && m == best + 1) {
       _showToast(Toast.newBest);
       _sound(Sfx.newBest);
-    } else if (s > 0 && s % 10 == 0) {
-      _showToast(Toast.milestone, s);
+    } else if (every > 0 && m > 0 && m % every == 0) {
+      _showToast(Toast.milestone, m);
       _sound(Sfx.milestone);
     } else {
       return;
     }
+    popTime = 0.25;
     _burst(width / 2, worldY(height * 0.3), 36, Palette.sprinkles, 80, 380);
   }
 
@@ -798,8 +988,8 @@ class GameState {
     toastTime = 1.6;
   }
 
-  void _sound(Sfx sfx, [int step = 0]) {
-    sounds.add(SoundCue(sfx, step));
+  void _sound(Sfx sfx) {
+    sounds.add(SoundCue(sfx));
     if (sounds.length > _maxSounds) sounds.removeAt(0); // nobody is draining (e.g. in tests)
   }
 
@@ -809,17 +999,22 @@ class GameState {
   }
 
   // ---------- tunnel ----------
-  // Control points hold a centre line and a gap width; Catmull-Rom curves join them.
+  // Control points hold a centre line and a gap width; Catmull-Rom curves join them. Every
+  // decision depends only on the dice and the world height, so the same seed makes the same
+  // tunnel.
 
-  double get _difficulty => math.min(1.0, screens / 40);
+  /// How hard the tunnel is at world height [wy]: 0 at the bottom, 1 from
+  /// [GameTuning.hardestAtMeters].
+  double _difficultyAt(double wy) => (wy / unitsPerMeter / tuning.hardestAtMeters).clamp(0.0, 1.0);
 
-  /// Chance that a stretch of tunnel wide enough for a hollow gets one: none early on, then
-  /// growing to [GameTuning.hollowChance].
-  double get _hollowChance {
-    final from = tuning.hollowsFromScreen, common = tuning.hollowsCommonAtScreen;
-    if (tuning.hollowChance <= 0 || screens < from) return 0;
-    final t = common > from ? ((screens - from) / (common - from)).clamp(0.0, 1.0) : 1.0;
-    return tuning.hollowChance * _lerp(0.4, 1, t);
+  /// Chance that a stretch of open space at world height [wy] gets a hollow: none before
+  /// [GameTuning.hollowsFromRealm], then growing to [GameTuning.hollowChance].
+  double _hollowChanceAt(double wy) {
+    final from = tuning.hollowsFromRealm, common = tuning.hollowsCommonAtRealm;
+    final r = _realmProgress(wy);
+    if (tuning.hollowChance <= 0 || r < from) return 0;
+    final t = common > from ? ((r - from) / (common - from)).clamp(0.0, 1.0) : 1.0;
+    return tuning.hollowChance * _lerp(0.5, 1, t);
   }
 
   _Control _makeControl(_Control prev) {
@@ -827,8 +1022,21 @@ class GameState {
     if (mode == GameMode.title) {
       return _Control(prev.wy + _rand(300, 420), width / 2 + _rand(-36, 36), _rand(285, 330));
     }
-    if (prev.wy + 450 >= _nextZoneWy) {
+    for (var r = 0; r < realms.length; r++) {
+      if (!_forksPlanned.contains(r) && prev.wy + 450 >= _forkWy(r)) {
+        _planFork(prev, r);
+        return _queued.removeAt(0);
+      }
+    }
+    if (prev.wy + 450 >= _nextZoneWy && !_forkDueBefore(_nextZoneWy + 45 * unitsPerMeter)) {
       _planBonusZone(prev);
+      return _queued.removeAt(0);
+    }
+    // a nest waits for a fork or bonus stretch coming up just after it, so open spaces stay apart
+    if (prev.wy + 450 >= _nextNestWy &&
+        !_forkDueBefore(_nextNestWy + 10 * unitsPerMeter) &&
+        _nextZoneWy > _nextNestWy + 25 * unitsPerMeter) {
+      _planOpenSection(prev, nest: true);
       return _queued.removeAt(0);
     }
     if (_rng.nextDouble() < tuning.openSectionChance) {
@@ -836,30 +1044,36 @@ class GameState {
       return _queued.removeAt(0);
     }
 
-    final d = _difficulty;
-    final gMin = _lerp(170, 104, d), gMax = _lerp(290, 210, d);
+    final d = _difficultyAt(prev.wy);
+    final gMin = _lerp(140, 104, d), gMax = _lerp(215, 170, d); // corridors, not halls
     final gap = _rng.nextDouble() < _lerp(0.25, 0.45, d) ? gMin + _rand(0, 14) : _rand(gMin, gMax);
     final shift = _lerp(110, 175, d);
     final lo = gap / 2 + 14, hi = width - gap / 2 - 14;
     // wander toward a random spot, but never further than `shift` in one stretch
     final centre = (prev.centre + (_rand(lo, hi) - prev.centre).clamp(-shift, shift)).clamp(lo, hi);
-    final control = _Control(prev.wy + _rand(260, 420) * _stretch, centre, gap);
+    final control = _Control(prev.wy + _rand(260, 420) * _stretchAt(prev.wy), centre, gap);
     if (_rng.nextDouble() < tuning.powerUpChance) {
       pickups.add(Pickup.powerUp(centre, control.wy, _randomPowerUp(), _rand(0, 6)));
-    } else if (_hollowChance > 0 && gap >= _hollowMinGap && _rng.nextDouble() < _hollowChance) {
-      _addHollow(control.wy, centre, gap);
     }
-    _maybeAddFragment(control.wy, centre, gap);
     return control;
   }
 
+  /// A memory fork is still to come below world height [wy]. A bonus stretch waits for it.
+  bool _forkDueBefore(double wy) {
+    for (var r = 0; r < realms.length; r++) {
+      if (!_forksPlanned.contains(r) && _forkWy(r) < wy) return true;
+    }
+    return false;
+  }
+
   /// Faster flight stretches the tunnel's bends out so they stay steerable.
-  double get _stretch => 1 + 0.65 * ((baseSpeed - _baseSpeed) / (_maxSpeed - _baseSpeed)).clamp(0.0, 1.0);
+  double _stretchAt(double wy) =>
+      1 + 0.65 * ((expectedSpeedAt(wy) - _baseSpeed) / (_maxSpeed - _baseSpeed)).clamp(0.0, 1.0);
 
   /// A long wide-open stretch with a snake of coins and one power-up.
   void _planBonusZone(_Control prev) {
     final start = math.max(_nextZoneWy, prev.wy + 300);
-    final length = math.max(900.0, baseSpeed * tuning.bonusZoneSeconds);
+    final length = math.max(700.0, expectedSpeedAt(start) * tuning.bonusZoneSeconds);
     _queued.addAll([
       _Control(start, width / 2, _wideGap),
       _Control(start + length / 2, width / 2, _wideGap),
@@ -870,32 +1084,51 @@ class GameState {
       pickups.add(Pickup.coin(width / 2 + math.sin(t * math.pi * 3) * 115, wy, wy * 0.05));
     }
     pickups.add(Pickup.powerUp(width / 2 - 115 * math.sin(math.pi * 1.5), start + length / 2, _randomPowerUp(), 0));
-    final every = tuning.bonusZoneEvery * screenLength;
-    while (_nextZoneWy < start + length + screenLength) {
+    final every = tuning.bonusZoneEveryMeters * unitsPerMeter;
+    while (_nextZoneWy < start + length + 2 * unitsPerMeter) {
       _nextZoneWy += every;
     }
+    _nextNestWy = math.max(_nextNestWy, start + length + 15 * unitsPerMeter);
   }
 
-  /// A shorter wide spot in the ordinary tunnel, with a few coins down the middle.
-  void _planOpenSection(_Control prev) {
-    final gap = _rand(290, 340);
+  /// A short wide pocket in the ordinary tunnel, with a few coins down the middle. Once the
+  /// Hollow Ones are about, this open space is where they wait: one, or late on sometimes two
+  /// at different heights. A [nest] always holds one.
+  void _planOpenSection(_Control prev, {bool nest = false}) {
+    final gap = _rand(230, 280); // wider than any corridor, room for a hollow to hop
     final centre = width / 2 + _rand(-15, 15);
-    final a = prev.wy + _rand(300, 420) * _stretch;
-    final b = a + _rand(260, 380) * _stretch;
+    final stretch = _stretchAt(prev.wy);
+    final a = prev.wy + _rand(240, 320) * stretch; // opens quickly, so the pocket stays short
+    final b = a + _rand(200, 280) * stretch;
     _queued.addAll([_Control(a, centre, gap), _Control(b, centre, gap)]);
     for (var i = 0; i < 6; i++) {
       final wy = a + (b - a) * (i + 0.5) / 6;
       pickups.add(Pickup.coin(centre + math.sin(i * 0.9) * 40, wy, wy * 0.05));
     }
-    // late in a run, a hollow may guard the coins
-    if (_hollowChance > 0 && _rng.nextDouble() < _hollowChance) _addHollow((a + b) / 2, centre, gap);
+    if (nest) {
+      final every = tuning.hollowNestEveryMeters * unitsPerMeter;
+      while (_nextNestWy < b + 10 * unitsPerMeter) {
+        _nextNestWy += every;
+      }
+    }
+    final chance = _hollowChanceAt(a);
+    if (nest || (chance > 0 && _rng.nextDouble() < chance)) {
+      final two = _rng.nextDouble() < chance * 0.5;
+      if (two) {
+        _addHollow(a + (b - a) / 3, centre, gap);
+        _addHollow(a + 2 * (b - a) / 3, centre, gap);
+      } else {
+        _addHollow((a + b) / 2, centre, gap);
+      }
+    }
   }
 
-  /// A hollow drifting across a stretch [gap] wide. However far it drifts, the other side
-  /// keeps at least [_passage] free.
+  /// A hollow hopping across a stretch [gap] wide. However far it hops, the other side keeps
+  /// at least [_passage] free.
   void _addHollow(double wy, double centre, double gap) {
+    if (gap < _hollowMinGap) return;
     final reach = (gap / 2 - Hollow.radius - 6) * _rand(0.45, 1);
-    final rate = math.min(_lerp(0.9, 1.8, _difficulty) * _rand(0.8, 1.2), _maxHollowDrift / reach);
+    final rate = math.min(_lerp(0.9, 1.8, _difficultyAt(wy)) * _rand(0.8, 1.2), _maxHollowDrift / reach);
     hollows.add(Hollow(wy, centre, reach, rate, _rand(0, 2 * math.pi)));
     if (!_warnedHollows) {
       _warnedHollows = true;
@@ -928,7 +1161,7 @@ class GameState {
     final t = (wy - p1.wy) / (p2.wy - p1.wy);
     var centre = _catmull(p0.centre, p1.centre, p2.centre, p3.centre, t);
     final gap = math.max(96.0, _catmull(p0.gap, p1.gap, p2.gap, p3.gap, t));
-    centre += math.sin(wy * 0.021 + _wobble) * 4 * (0.5 + _difficulty);
+    centre += math.sin(wy * 0.021 + _wobble) * 4 * (0.5 + _difficultyAt(wy));
     var l = centre - gap / 2, r = centre + gap / 2;
     if (l < 10) {
       r += 10 - l;
@@ -960,13 +1193,20 @@ class GameState {
       ..addAll(const [
         _Control(-700, width / 2, width - 40),
         _Control(-300, width / 2, width - 40),
-      ])
-      ..add(_Control(height * 0.95, width / 2, width - 56));
+        _Control(defaultHeight * 0.95, width / 2, width - 56), // the same opening on any screen
+      ]);
     _queued.clear();
     pickups.clear();
     hollows.clear();
+    _forksPlanned.clear();
     _ctrlIdx = 0;
-    _nextZoneWy = tuning.bonusZoneEvery > 0 ? tuning.bonusZoneEvery * screenLength : double.infinity;
+    // the first one half as far in, so with realms as far apart, each comes halfway through
+    // a realm, well clear of the memory forks
+    _nextZoneWy =
+        tuning.bonusZoneEveryMeters > 0 ? tuning.bonusZoneEveryMeters * unitsPerMeter / 2 : double.infinity;
+    final nests = tuning.hollowNestEveryMeters * unitsPerMeter;
+    _nextNestWy =
+        tuning.hollowChance > 0 && nests > 0 ? realmStart(tuning.hollowsFromRealm) + nests / 2 : double.infinity;
     walls.clear();
     _sampleId = 0;
     _nextW = distance - 120;
@@ -1012,6 +1252,7 @@ class GameState {
     final c = t.clamp(0.0, 1.0);
     return c * c * (3 - 2 * c);
   }
+
   static double _lerp(double a, double b, double t) => a + (b - a) * t;
   static double _length(double x, double y) => math.sqrt(x * x + y * y);
   static double _catmull(double p0, double p1, double p2, double p3, double t) {

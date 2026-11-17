@@ -11,14 +11,17 @@ import '../pixel_font.dart';
 import '../sprites.dart';
 
 /// The coin shop, opened from the title and game-over screens: a shelf of bunny skins and one
-/// of trails, a big preview of the selected item, and a button to buy or wear it. Drawn in
-/// field coordinates over everything but the speaker button.
+/// of trails, six to a page, and one of power-ups to use during a run, a big preview of the selected item (with what it does, for the
+/// dearest ones), and a button to buy or wear it. Drawn in field coordinates over everything
+/// but the speaker button.
 class ShopScreen extends Component with HasGameReference<GoingUpGame> {
   static const double _w = GameState.width;
 
   bool isOpen = false;
   Shelf shelf = Shelf.bunnies;
   ShopItem selected = Shop.defaultSkin;
+  int page = 0;
+  static const perPage = 6;
   double _cheer = 0; // celebration after a purchase, in seconds left
 
   final _pixels = Paint()..filterQuality = FilterQuality.none;
@@ -36,9 +39,15 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
   void _show(Shelf next) {
     shelf = next;
     final items = Shop.shelf(next);
-    final worn = items.where(game.state.isWearing); // power-ups are never worn
-    _select(worn.isEmpty ? items.first : worn.first);
+    final worn = math.max(0, items.indexWhere(game.state.isWearing)); // power-ups are never worn
+    _select(items[worn]);
+    page = worn ~/ perPage;
   }
+
+  int get pages => (Shop.shelf(shelf).length + perPage - 1) ~/ perPage;
+
+  /// The items on the page showing.
+  List<ShopItem> get _pageItems => Shop.shelf(shelf).skip(page * perPage).take(perPage).toList();
 
   void _select(ShopItem item) {
     if (item != selected) _cheer = 0; // the celebration belongs to the item just bought
@@ -47,18 +56,20 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
 
   // ---------- layout (field units) ----------
 
-  /// Top of the shop, which is 618 tall: centred when the screen has room to spare.
+  /// Top of the shop, which is 586 tall: centred when the screen has room to spare.
   double get _top {
     final top = 10 + game.safeTop;
-    final spare = (game.state.height - game.safeBottom - 12) - (top + 618);
+    final spare = (game.state.height - game.safeBottom - 12) - (top + 586);
     return top + math.max(0.0, spare / 2);
   }
 
   Rect tab(Shelf s) => Rect.fromLTWH(16 + s.index * (352 / 3 + 8), _top + 50, 352 / 3, 36);
-  Rect get preview => Rect.fromLTWH(16, _top + 98, _w - 32, 160);
-  Rect card(int i) => Rect.fromLTWH(16 + (i % 3) * (352 / 3 + 8), _top + 270 + (i ~/ 3) * 108, 352 / 3, 100);
-  Rect get actionButton => Rect.fromLTWH(16, _top + 490, _w - 32, 48);
-  Rect get backButton => Rect.fromLTWH((_w - 140) / 2, _top + 578, 140, 40);
+  Rect get preview => Rect.fromLTWH(16, _top + 96, _w - 32, 150);
+  Rect card(int i) => Rect.fromLTWH(16 + (i % 3) * (352 / 3 + 8), _top + 256 + (i ~/ 3) * 98, 352 / 3, 90);
+  Rect get prevPage => Rect.fromLTWH(16, _top + 452, 56, 28);
+  Rect get nextPage => Rect.fromLTWH(_w - 72, _top + 452, 56, 28);
+  Rect get actionButton => Rect.fromLTWH(16, _top + 488, _w - 32, 48);
+  Rect get backButton => Rect.fromLTWH((_w - 140) / 2, _top + 546, 140, 40);
 
   // ---------- input ----------
 
@@ -72,7 +83,7 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
         return;
       }
     }
-    final items = Shop.shelf(shelf);
+    final items = _pageItems;
     for (var i = 0; i < items.length; i++) {
       if (hit(card(i))) {
         _select(items[i]);
@@ -80,7 +91,13 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
         return;
       }
     }
-    if (hit(actionButton)) {
+    if (hit(prevPage) && page > 0) {
+      page--;
+      _sound(Sfx.click);
+    } else if (hit(nextPage) && page < pages - 1) {
+      page++;
+      _sound(Sfx.click);
+    } else if (hit(actionButton)) {
       _act();
     } else if (hit(backButton)) {
       close();
@@ -136,10 +153,11 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
 
     _preview(canvas, state, t);
 
-    final items = Shop.shelf(shelf);
+    final items = _pageItems;
     for (var i = 0; i < items.length; i++) {
       _card(canvas, state, card(i), items[i], t);
     }
+    _pager(canvas);
 
     _action(canvas, state);
 
@@ -171,19 +189,32 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
     canvas.restore();
 
     final x = rect.left + 186;
-    PixelFont.draw(canvas, words.kind(item.shelf), x, rect.top + 18, 2, Palette.muted);
+    PixelFont.draw(canvas, words.kind(item.shelf), x, rect.top + 20, 2, Palette.muted);
     final name = words.itemName(item);
-    PixelFont.draw(canvas, name, x, rect.top + 38, math.min(3.0, 170 / (name.length * 6 - 1)), Palette.text, shadow: Palette.ink);
+    PixelFont.draw(canvas, name, x, rect.top + 40, math.min(3.0, 170 / (name.length * 6 - 1)), Palette.text, shadow: Palette.ink);
     if (item is PowerUpItem) {
       final help = words.powerUpHelp(item.boost);
       for (var i = 0; i < help.length; i++) {
-        PixelFont.draw(canvas, help[i], x, rect.top + 70 + i * 14, 1.4, Palette.muted);
+        PixelFont.draw(canvas, help[i], x, rect.top + 68 + i * 14, 1.4, Palette.muted);
       }
-      PixelFont.draw(canvas, words.have(state.countOf(item)), x, rect.top + 120, 2, Palette.glimmer);
-      if (_cheer > 0) PixelFont.draw(canvas, words.yay, x, rect.top + 138, 2, Palette.sun, shadow: Palette.hot);
-    } else {
-      _status(canvas, state, item, x, rect.top + 92, 2, align: 0);
-      if (_cheer > 0) PixelFont.draw(canvas, words.yay, x, rect.top + 118, 3, Palette.sun, shadow: Palette.hot);
+      PixelFont.draw(canvas, words.have(state.countOf(item)), x, rect.top + 114, 2, Palette.glimmer);
+      if (_cheer > 0) PixelFont.draw(canvas, words.yay, x, rect.top + 132, 2, Palette.sun, shadow: Palette.hot);
+      return;
+    }
+    _status(canvas, state, item, x, rect.top + 72, 2, align: 0);
+    if (_cheer > 0) PixelFont.draw(canvas, words.yay, x, rect.top + 94, 3, Palette.sun, shadow: Palette.hot);
+
+    // what it does, on a band across the bottom
+    final perk = item.perk;
+    if (perk != Perk.none) {
+      final band = Rect.fromLTWH(rect.left + 6, rect.bottom - 34, rect.width - 12, 28);
+      drawPanel(canvas, band, edge: Palette.glimmer);
+      final text = words.perk(perk);
+      final px = math.min(2.0, (band.width - 32) / (text.length * 6 - 1));
+      final w = 20 + PixelFont.widthOf(text, px);
+      final left = band.center.dx - w / 2;
+      _perkStar(canvas, Offset(left + 6, band.center.dy), 6, t);
+      PixelFont.draw(canvas, text, left + 20, band.center.dy - 3.5 * px, px, Palette.glimmer);
     }
   }
 
@@ -196,6 +227,43 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
       case Boost.tripleShield:
         drawPowerUp(canvas, c, PowerUp.shield, 13 * k);
         PixelFont.drawCentered(canvas, 'X3', c.dx + 12 * k, c.dy + 6 * k, 1.2 * k, Palette.text, shadow: Palette.ink);
+    }
+  }
+
+  /// A four-pointed twinkle marking an item with a perk.
+  void _perkStar(Canvas canvas, Offset p, double size, double t) {
+    final s = size * (0.85 + 0.15 * math.sin(t * 5));
+    canvas.drawPath(
+        Path()
+          ..moveTo(p.dx, p.dy - s)
+          ..quadraticBezierTo(p.dx, p.dy, p.dx + s, p.dy)
+          ..quadraticBezierTo(p.dx, p.dy, p.dx, p.dy + s)
+          ..quadraticBezierTo(p.dx, p.dy, p.dx - s, p.dy)
+          ..quadraticBezierTo(p.dx, p.dy, p.dx, p.dy - s)
+          ..close(),
+        Paint()..color = Palette.glimmer);
+  }
+
+  /// Arrows to turn the page, and a dot for each page.
+  void _pager(Canvas canvas) {
+    if (pages < 2) return;
+    final arrow = Paint()..color = Palette.text;
+    for (final (rect, dir, on) in [(prevPage, -1.0, page > 0), (nextPage, 1.0, page < pages - 1)]) {
+      if (!on) continue;
+      drawPanel(canvas, rect);
+      final c = rect.center;
+      canvas.drawPath(
+          Path()
+            ..moveTo(c.dx + dir * 7, c.dy)
+            ..lineTo(c.dx - dir * 5, c.dy - 8)
+            ..lineTo(c.dx - dir * 5, c.dy + 8)
+            ..close(),
+          arrow);
+    }
+    final y = prevPage.center.dy;
+    for (var i = 0; i < pages; i++) {
+      final x = _w / 2 + (i - (pages - 1) / 2) * 18;
+      canvas.drawCircle(Offset(x, y), i == page ? 5 : 3.5, Paint()..color = i == page ? Palette.sun : Palette.muted);
     }
   }
 
@@ -214,12 +282,12 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
     switch (item) {
       case BunnySkin():
         // whole sprite (rows 0-24) centred in the top part of the card
-        const s = 1.6;
-        _bunny(canvas, game.sprites.skin(item), Offset(c, rect.top + 33 + 1.5 * s), s, wingsUp: false);
+        const s = 1.5;
+        _bunny(canvas, game.sprites.skin(item), Offset(c, rect.top + 28 + 1.5 * s), s, wingsUp: false);
       case TrailStyle():
-        _arc(canvas, item, Offset(c, rect.top + 52), 26);
+        _arc(canvas, item, Offset(c, rect.top + 46), 24);
       case PowerUpItem():
-        _powerUpIcon(canvas, item, Offset(c, rect.top + 32), 1);
+        _powerUpIcon(canvas, item, Offset(c, rect.top + 28), 1);
         final have = state.countOf(item);
         if (have > 0) {
           final text = 'X$have';
@@ -229,9 +297,10 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
           PixelFont.drawCentered(canvas, text, badge.center.dx, badge.top + 2.5, 1.5, Palette.text);
         }
     }
+    if (item.perk != Perk.none) _perkStar(canvas, rect.topRight + const Offset(-12, 12), 6, t);
     final name = game.strings.itemName(item);
-    PixelFont.drawCentered(canvas, name, c, rect.top + 62, math.min(2.0, (rect.width - 8) / (name.length * 6 - 1)), Palette.text);
-    _status(canvas, state, item, c, rect.top + 80, 2, align: 0.5);
+    PixelFont.drawCentered(canvas, name, c, rect.top + 54, math.min(2.0, (rect.width - 8) / (name.length * 6 - 1)), Palette.text);
+    _status(canvas, state, item, c, rect.top + 71, 2, align: 0.5);
   }
 
   /// "WEARING", "OWNED" or a coin and the price (gold when it's affordable). [align] 0 puts
