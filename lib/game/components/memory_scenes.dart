@@ -1,105 +1,142 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/animation.dart' show Curves;
+
 import '../drawing.dart';
 import '../memories.dart';
 import '../palette.dart';
+import '../pixel_font.dart';
+import '../sprites.dart';
 
-/// The little animated pictures memories come back with: sepia ink on old paper, like a
-/// faded photograph that moves. Each is drawn in a 320 x 170 box, scaled to fit [rect]; [t] is
-/// seconds since the memory came back, which drives the animation. The picture develops like
-/// an old photograph (washed out white at first), the view drifts slowly closer, and dust
-/// floats through the light.
-void drawMemoryScene(Canvas canvas, Rect rect, MemoryScene scene, double t) {
+/// The memory scenes: little paper theatres, like a pop-up book. Layers of cut paper unfold
+/// into place, then the family (drawn from Pip's own sprite, in sepia) acts the memory out in
+/// two or three beats. Each is drawn in a [sceneSize] box; [t] is seconds since the memory
+/// started playing, so the scene's layers rise from about one second in.
+///
+/// The deeper the realm a memory belongs to, the more corrupted it plays ([corruptionOf]): its
+/// picture slips in slices, a red ghost copy slides out of place, and the film burns.
+
+const sceneSize = Size(340, 330);
+const double _w = 340, _h = 330;
+
+/// How corrupted [memory] plays: clean in the bright sky, broken in the Void. The very last
+/// memory, when Pip remembers its name, comes through almost clear.
+double corruptionOf(Memory memory) =>
+    memory.scene == MemoryScene.name ? 0.1 : const [0.0, 0.25, 0.45, 0.7, 0.95][memory.realm];
+
+/// Draws [memory]'s scene at time [t] into [rect], with film wear and its corruption.
+/// [corruption] overrides how broken it plays (the drifting photos use their own).
+void drawMemoryScene(Canvas canvas, Rect rect, Memory memory, double t, Sprites art, {double? corruption}) {
+  final recorder = PictureRecorder();
+  final g = Canvas(recorder);
+  _Scene(g, t, art).draw(memory.scene);
+  _filmWear(g, t, corruption ?? corruptionOf(memory));
+  final picture = recorder.endRecording();
+  final c = corruption ?? corruptionOf(memory);
+
   canvas.save();
-  canvas.clipRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)));
+  canvas.clipRect(rect);
   canvas.translate(rect.left, rect.top);
   canvas.scale(rect.width / _w, rect.height / _h);
-  canvas.drawRect(const Rect.fromLTWH(0, 0, _w, _h), Paint()..color = _paper);
-  // a slow drift closer, with a little sway, like a camera that can't keep still
-  final zoom = 1 + 0.08 * ramp(t, 0, 9);
-  canvas.save();
-  canvas.translate(_w / 2 + math.sin(t * 0.35) * 4, _h / 2 + math.cos(t * 0.27) * 2);
-  canvas.scale(zoom);
-  canvas.translate(-_w / 2, -_h / 2);
-  _Scene(canvas, t).draw(scene);
-  canvas.restore();
-  _dust(canvas, t);
-  _filmWear(canvas, t);
-  // developing: the image comes up out of a washed-out white
-  final develop = 1 - ramp(t, 0.25, 1.7);
-  if (develop > 0) canvas.drawRect(const Rect.fromLTWH(0, 0, _w, _h), Paint()..color = _glow.withValues(alpha: develop));
-  canvas.restore();
-  // a dark wooden frame
-  canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, const Radius.circular(4)),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4
-        ..color = const Color(0xFF3A2618));
-}
-
-const double _w = 320, _h = 170;
-const _paper = Color(0xFFE8D8B4);
-const _ink = Color(0xFF3B2A1C);
-const _wash = Color(0xFFB89A6E); // a lighter ink wash
-const _glow = Color(0xFFF7EBC8);
-
-/// Specks of dust drifting through the projector's light, some catching it, some dark.
-void _dust(Canvas canvas, double t) {
-  final paint = Paint();
-  for (var i = 0; i < 16; i++) {
-    final x = (hash01(i + 200) * _w + t * (4 + 8 * hash01(i + 220))) % _w;
-    final y = (hash01(i + 210) * _h + math.sin(t * 0.7 + i) * 10 - t * 3 * hash01(i + 230)) % _h;
-    final light = i.isEven;
-    paint.color = (light ? _glow : _ink).withValues(alpha: 0.35 + 0.3 * math.sin(t * 2 + i));
-    canvas.drawCircle(Offset(x, y), 0.6 + hash01(i + 240) * 1.1, paint);
+  if (c <= 0) {
+    canvas.drawPicture(picture);
+  } else {
+    // the picture slips sideways in bands, now and then
+    const bands = 6;
+    final frame = (t * 9).floor();
+    for (var i = 0; i < bands; i++) {
+      final slip = hash2(frame + i * 13.0, 3) < c * 0.45 ? (hash2(frame * 7.0 + i, 5) - 0.5) * 30 * c : 0.0;
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(0, _h * i / bands, _w, _h / bands + 0.5));
+      canvas.translate(slip, 0);
+      canvas.drawPicture(picture);
+      canvas.restore();
+    }
+    if (c > 0.6) {
+      // a red ghost copy, slipped out of place
+      canvas.saveLayer(
+          const Rect.fromLTWH(-10, 0, _w + 20, _h),
+          Paint()
+            ..colorFilter = const ColorFilter.mode(Color(0xFFC0202C), BlendMode.srcIn)
+            ..color = Color.fromRGBO(0, 0, 0, 0.13 + 0.07 * math.sin(t * 9)));
+      canvas.translate(4 + math.sin(t * 7) * 2, 0);
+      canvas.drawPicture(picture);
+      canvas.restore();
+    }
   }
+  canvas.restore();
+  picture.dispose();
 }
 
-/// Old-film wear: a vignette, a flickering exposure and the odd scratch.
-void _filmWear(Canvas canvas, double t) {
-  final flicker = 0.04 + 0.04 * hash01((t * 12).floor());
-  canvas.drawRect(const Rect.fromLTWH(0, 0, _w, _h), Paint()..color = _ink.withValues(alpha: flicker));
-  canvas.drawRect(
+/// Old film: a flickering exposure, grain, the odd scratch, burns in corrupted memories, and
+/// a vignette.
+void _filmWear(Canvas g, double t, double corruption) {
+  final paint = Paint();
+  paint.color = Color.fromRGBO(40, 25, 12, 0.04 + 0.05 * hash2((t * 12).floorToDouble(), 9));
+  g.drawRect(const Rect.fromLTWH(0, 0, _w, _h), paint);
+  final grain = (t * 24).floorToDouble();
+  for (var i = 0; i < 90; i++) {
+    paint.color = hash2(i.toDouble(), grain) < 0.5 ? const Color(0x40FFF0D2) : const Color(0x401E120A);
+    g.drawRect(Rect.fromLTWH(hash2(i * 3.0, grain) * _w, hash2(i * 7.0, grain) * _h, 1, 1), paint);
+  }
+  final scratch = (t * 6).floorToDouble();
+  if (hash2(scratch, 4) < 0.5) {
+    final x = hash2(scratch, 5) * _w;
+    g.drawLine(Offset(x, 0), Offset(x + 3, _h), Paint()
+      ..strokeWidth = 0.8
+      ..color = const Color(0x591E120A));
+  }
+  if (corruption > 0.5) {
+    for (var i = 0; i < 3; i++) {
+      final cycle = t * 0.5 + i / 3, life = cycle - cycle.floorToDouble(), n = cycle.floorToDouble();
+      final x = hash2(i.toDouble(), n) * _w, y = hash2(i + 4.0, n) * _h, r = 6 + life * 30;
+      g.drawCircle(
+          Offset(x, y),
+          r,
+          Paint()
+            ..shader = Gradient.radial(Offset(x, y), r, [
+              Color.fromRGBO(255, 245, 220, 0.8 * (1 - life)),
+              Color.fromRGBO(200, 90, 30, 0.5 * (1 - life)),
+              const Color(0x00C85A1E),
+            ], [
+              0,
+              0.6,
+              1
+            ]));
+    }
+  }
+  g.drawRect(
       const Rect.fromLTWH(0, 0, _w, _h),
       Paint()
-        ..shader = Gradient.radial(const Offset(_w / 2, _h / 2), _w * 0.62, [
-          _ink.withValues(alpha: 0),
-          _ink.withValues(alpha: 0.55),
+        ..shader = Gradient.radial(const Offset(_w / 2, _h / 2), _w * 0.75, [
+          const Color(0x001E120A),
+          const Color(0x991E120A),
         ], [
-          0.55,
+          0.45,
           1
         ]));
-  final frame = (t * 8).floor();
-  if (hash01(frame) < 0.5) {
-    final x = hash01(frame + 7) * _w;
-    canvas.drawLine(Offset(x, 0), Offset(x + 3, _h),
-        Paint()
-          ..strokeWidth = 0.8
-          ..color = _ink.withValues(alpha: 0.35));
-  }
 }
 
+const _ink = Color(0xFF24170E);
+const _paperLight = Color(0xFFEAD9B0);
+const _glow = Color(0xFFF7EBC8);
+const _redInk = Color(0xFF7A1E22);
+
 class _Scene {
-  _Scene(this.c, this.t);
+  _Scene(this.c, this.t, this.art);
 
   final Canvas c;
   final double t;
+  final Sprites art;
   final _fill = Paint();
   final _line = Paint()
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.round
     ..strokeJoin = StrokeJoin.round;
+  final _pixels = Paint()..filterQuality = FilterQuality.none;
 
-  Paint ink([double alpha = 1]) => _fill..color = _ink.withValues(alpha: alpha);
-  Paint wash([double alpha = 1]) => _fill..color = _wash.withValues(alpha: alpha);
-  Paint glow([double alpha = 1]) => _fill..color = _glow.withValues(alpha: alpha);
-  Paint stroke(Color color, double width, [double alpha = 1]) => _line
-    ..color = color.withValues(alpha: alpha)
-    ..strokeWidth = width;
-
-  /// Eases from 0 to 1 between [from] and [to] seconds.
+  double get cam => math.sin(t * 0.3) * 6;
   double at(double from, double to) => ramp(t, from, to);
 
   void draw(MemoryScene scene) {
@@ -147,433 +184,730 @@ class _Scene {
     }
   }
 
-  // ---------- shared pieces ----------
+  // ---------- pieces of the paper theatre ----------
 
-  /// A bunny seen from the side-ish front: body, head and two long ears, standing on [feet].
-  /// [s] is its height. [ears] tilts the ears (0 upright, positive droops them).
-  ///
-  /// Every bunny is alive: its eyes (pale on a dark bunny, dark on a pale one) blink now and
-  /// then, and its ears give a twitch.
-  void bunny(Offset feet, double s, Paint paint, {double ears = 0, bool wings = false, double flap = 0}) {
-    final body = Rect.fromCenter(center: feet + Offset(0, -s * 0.28), width: s * 0.55, height: s * 0.56);
-    final head = feet + Offset(0, -s * 0.66);
-    final seed = (feet.dx * 7 + feet.dy * 3 + s).round();
-    final beat = t + hash01(seed) * 5;
-    final twitch = (beat * 0.8) % 2.3 < 0.12 ? 0.12 : 0.0;
-    if (wings) {
-      for (final side in const [-1.0, 1.0]) {
-        final root = feet + Offset(side * s * 0.2, -s * 0.42);
-        final tip = root + Offset(side * s * 0.55, -s * (0.25 + 0.2 * flap));
-        c.drawPath(
-            Path()
-              ..moveTo(root.dx, root.dy)
-              ..quadraticBezierTo(root.dx + side * s * 0.3, root.dy - s * 0.45, tip.dx, tip.dy)
-              ..quadraticBezierTo(root.dx + side * s * 0.35, root.dy - s * 0.05, root.dx, root.dy + s * 0.06),
-            paint);
-      }
+  /// A cut-paper layer: a soft drop shadow under the shape, and a faint light rim on it.
+  void cutout(Path path, Color fill, {double shadow = 0.35, bool rim = true}) {
+    c.save();
+    c.translate(3, 4);
+    c.drawPath(path, _fill..color = Color.fromRGBO(30, 18, 10, shadow));
+    c.restore();
+    c.drawPath(path, _fill..color = fill);
+    if (rim) {
+      c.drawPath(
+          path,
+          _line
+            ..strokeWidth = 1
+            ..color = const Color(0x2EFFF0D2));
     }
-    c.drawOval(body, paint);
-    c.drawCircle(head, s * 0.2, paint);
-    for (final side in const [-1.0, 1.0]) {
+  }
+
+  /// Pop-up book entrance: layer [i] rises and unfolds into place, the layers one after
+  /// another from about one second in.
+  void popup(int i, void Function() draw, {double start = 1.0}) {
+    final e = Curves.easeOutBack.transform(ramp(t, start + i * 0.16, start + i * 0.16 + 0.65).clamp(0.0, 1.0));
+    if (e <= 0.001) return;
+    final squash = math.max(0.05, e);
+    c.save();
+    c.translate(0, _h * (1 - e) * 0.5 + _h * (1 - squash));
+    c.scale(1, squash);
+    draw();
+    c.restore();
+  }
+
+  void sky(Color top, Color bottom) {
+    c.drawRect(
+        const Rect.fromLTWH(-200, -200, _w + 400, _h + 400),
+        Paint()..shader = Gradient.linear(Offset.zero, const Offset(0, _h), [top, bottom]));
+  }
+
+  Path hills(double y, double amp, double seed) {
+    final p = Path()
+      ..moveTo(-20, _h + 10)
+      ..lineTo(-20, y);
+    for (var x = -20.0; x <= _w + 20; x += 10) {
+      p.lineTo(x, y + math.sin(x * 0.02 + seed) * amp + math.sin(x * 0.051 + seed * 2) * amp * 0.4);
+    }
+    return p
+      ..lineTo(_w + 20, _h + 10)
+      ..close();
+  }
+
+  Path grass(double depth) {
+    final p = Path()..moveTo(-20, _h + 10);
+    for (var x = -20.0; x <= _w + 20; x += 7) {
+      p
+        ..lineTo(x, _h - 6 - hash2(x, 2) * depth)
+        ..lineTo(x + 3.5, _h - 2);
+    }
+    return p
+      ..lineTo(_w + 20, _h + 10)
+      ..close();
+  }
+
+  Path oakTree(double x, double ground, double s) {
+    final tree = Path()
+      ..moveTo(x - 18 * s, ground)
+      ..lineTo(x - 9 * s, ground - 90 * s)
+      ..lineTo(x + 9 * s, ground - 90 * s)
+      ..lineTo(x + 18 * s, ground)
+      ..close();
+    for (final (dx, dy, r) in const [(0.0, -130.0, 46.0), (-34.0, -110.0, 34.0), (36.0, -112.0, 36.0), (-12.0, -160.0, 30.0), (20.0, -156.0, 30.0)]) {
+      tree.addOval(Rect.fromCircle(center: Offset(x + dx * s, ground + dy * s), radius: r * s));
+    }
+    return tree;
+  }
+
+  void moonDisc(Offset at, double r, {double eaten = 0, Color face = const Color(0xFFEFE0BB)}) {
+    c.drawCircle(
+        at,
+        r * 2.6,
+        Paint()
+          ..shader = Gradient.radial(at, r * 2.6, [
+            Color.fromRGBO(240, 220, 170, 0.35 * (1 - eaten)),
+            const Color(0x00F0DCAA),
+          ]));
+    if (eaten > 0) {
+      c.drawCircle(
+          at,
+          r * 1.7,
+          Paint()
+            ..shader = Gradient.radial(at, r * 1.7, [
+              Color.fromRGBO(190, 30, 45, 0.9 * eaten),
+              const Color(0x00BE1E2D),
+            ], [
+              0.55,
+              1
+            ]));
+    }
+    c.drawCircle(at, r, _fill..color = face);
+    _fill.color = const Color(0x80A0825A);
+    for (final (dx, dy, cr) in const [(-0.33, -0.22, 0.18), (0.26, 0.15, 0.24), (-0.11, 0.4, 0.11)]) {
+      c.drawCircle(at + Offset(dx * r, dy * r), cr * r, _fill);
+    }
+    if (eaten > 0) {
       c.save();
-      c.translate(head.dx + side * s * 0.08, head.dy - s * 0.12);
-      c.rotate(side * (0.15 + ears + (side > 0 ? twitch : 0)));
-      c.drawRRect(
-          RRect.fromRectAndRadius(Rect.fromLTWH(-s * 0.055, -s * 0.38, s * 0.11, s * 0.4), Radius.circular(s * 0.05)),
-          paint);
+      c.clipPath(Path()..addOval(Rect.fromCircle(center: at, radius: r + 0.5)));
+      c.drawCircle(at + Offset(r * 2.2 * (1 - eaten), -r * 0.4 * (1 - eaten)), r * 1.05, _fill..color = const Color(0xFF0A0605));
       c.restore();
     }
-    // the eyes, blinking now and then
-    if (s >= 18) {
-      final color = paint.color;
-      final dark = color.computeLuminance() < 0.25;
-      final eye = Paint()..color = (dark ? _glow : _ink).withValues(alpha: color.a);
-      final shut = beat % 3.7 < 0.14;
-      for (final side in const [-1.0, 1.0]) {
-        final e = head + Offset(side * s * 0.075, -s * 0.02);
-        if (shut) {
-          c.drawRect(Rect.fromCenter(center: e, width: s * 0.06, height: s * 0.012 + 0.6), eye);
-        } else {
-          c.drawCircle(e, s * 0.028 + 0.4, eye);
-        }
-      }
-    }
   }
 
-  void hill(double top, Paint paint) {
-    c.drawPath(
-        Path()
-          ..moveTo(0, _h)
-          ..lineTo(0, top + 18)
-          ..quadraticBezierTo(_w * 0.45, top - 14, _w, top + 22)
-          ..lineTo(_w, _h)
-          ..close(),
-        paint);
-  }
-
-  void oakTree(Offset base, double s, Paint paint) {
-    c.drawPath(
-        Path()
-          ..moveTo(base.dx - s * 0.12, base.dy)
-          ..lineTo(base.dx - s * 0.07, base.dy - s * 0.55)
-          ..lineTo(base.dx + s * 0.07, base.dy - s * 0.55)
-          ..lineTo(base.dx + s * 0.14, base.dy)
-          ..close(),
-        paint);
-    for (final (dx, dy, r) in const [(0.0, -0.8, 0.33), (-0.3, -0.62, 0.24), (0.3, -0.64, 0.26), (-0.12, -0.98, 0.2), (0.18, -0.95, 0.2)]) {
-      c.drawCircle(base + Offset(dx * s, dy * s), r * s, paint);
-    }
-  }
-
-  void moon(Offset centre, double r, {double bite = 0}) {
-    c.drawCircle(centre, r * 1.8, glow(0.35));
-    c.drawCircle(centre, r, glow());
-    c.drawCircle(centre, r, stroke(_ink, 1.2, 0.6));
-    if (bite > 0) {
-      c.save();
-      c.clipPath(Path()..addOval(Rect.fromCircle(center: centre, radius: r)));
-      c.drawCircle(centre + Offset(r * 2 * (1 - bite), -r * 0.3 * (1 - bite)), r * 1.02, ink());
-      c.restore();
-    }
-  }
-
-  void stars(int n, int seed, double alpha) {
+  void stars(int n, double seed, double alpha) {
     for (var i = 0; i < n; i++) {
-      final p = Offset(hash01(seed + i) * _w, hash01(seed + 40 + i) * _h * 0.6);
-      final tw = 0.5 + 0.5 * math.sin(t * 3 + i);
-      c.drawCircle(p, 1 + hash01(seed + 80 + i), glow(alpha * tw));
+      _fill.color = Color.fromRGBO(232, 216, 180, alpha * (0.4 + 0.6 * math.sin(t * 2 + i).abs()));
+      c.drawRect(Rect.fromLTWH(hash2(i.toDouble(), seed) * _w, hash2(i.toDouble(), seed + 1) * _h * 0.7, 1.5, 1.5), _fill);
     }
   }
 
-  void arc(Offset centre, double radius, double band, double alpha, {double progress = 1}) {
+  /// A rainbow arch in faded paint, drawn [progress] of the way round.
+  void rainbow(Offset base, double radius, double band, double alpha, {double progress = 1}) {
     for (var k = 0; k < 6; k++) {
-      // Mama's rainbows, faded to old paint
-      final color = Color.lerp(Palette.rainbow[k], _wash, 0.45)!;
-      c.drawArc(Rect.fromCircle(center: centre, radius: radius - k * band), math.pi, math.pi * progress, false,
-          stroke(color, band + 0.5, alpha));
+      c.drawArc(
+          Rect.fromCircle(center: base, radius: radius - k * band),
+          math.pi,
+          math.pi * progress,
+          false,
+          _line
+            ..strokeWidth = band + 0.5
+            ..color = Color.lerp(Palette.rainbow[k], const Color(0xFFB89A6E), 0.45)!.withValues(alpha: alpha));
     }
   }
 
-  // ---------- the scenes ----------
+  /// A bunny from Pip's sprite standing with its feet at ([x], [feet]), [px] per sprite pixel.
+  /// [blink] closes its eyes, [flip] turns it to face left, [wings] flap with [flap].
+  void bunny(BunnySprites sprites, double x, double feet, double px,
+      {bool wings = false, double flap = 0, bool blink = false, bool flip = false, double alpha = 1, Color? eyeLid}) {
+    c.save();
+    c.translate(x, feet);
+    if (flip) c.scale(-1, 1);
+    if (alpha < 1) c.saveLayer(Rect.fromLTWH(-20 * px, -26 * px, 40 * px, 28 * px), Paint()..color = Color.fromRGBO(0, 0, 0, alpha));
+    void image(Image image, double dx, double dy) {
+      c.drawImageRect(image, Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+          Rect.fromLTWH(dx * px, dy * px, image.width * px, image.height * px), _pixels);
+    }
+
+    if (wings) {
+      final up = flap > 0.5;
+      image(up ? sprites.wingUpLeft : sprites.wingDownLeft, -14, -12);
+      image(up ? sprites.wingUpRight : sprites.wingDownRight, 7, -12);
+    }
+    image(sprites.bunny, -8, -25);
+    if (blink) {
+      _fill.color = eyeLid ?? const Color(0xFFC7A878);
+      c.drawRect(Rect.fromLTWH(-5 * px, -15 * px, 2 * px, 2 * px), _fill);
+      c.drawRect(Rect.fromLTWH(3 * px, -15 * px, 2 * px, 2 * px), _fill);
+    }
+    if (alpha < 1) c.restore();
+    c.restore();
+  }
+
+  bool blinking(double offset) => (t + offset) % 3.4 < 0.12;
+
+  // ---------- Rainbow Sky ----------
 
   void _wings() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), wash(0.25));
-    // a rainbow trail fading below the bunny
+    sky(_paperLight, const Color(0xFFD3B88A));
+    popup(0, () => cutout(_cloud(70, 90, 1.2), const Color(0xFFF2E6C6), shadow: 0.15));
+    popup(1, () => cutout(_cloud(250, 60, 1), const Color(0xFFF2E6C6), shadow: 0.15));
+    // Pip rises into the frame on the wings it doesn't remember getting
+    final rise = Curves.easeOutCubic.transform(at(1.6, 3.4));
+    final y = _h + 60 - rise * 230 + math.sin(t * 2.4) * 5;
     for (var k = 0; k < 6; k++) {
-      final color = Color.lerp(Palette.rainbow[k], _wash, 0.4)!;
-      final path = Path()..moveTo(150 + k * 4.0, 170);
-      for (var y = 170.0; y > 100; y -= 6) {
-        path.lineTo(150 + k * 4.0 + math.sin(y * 0.08 - t * 4) * 4, y);
+      final path = Path()..moveTo(170.0 - 12 + k * 4.4, _h + 20);
+      for (var yy = _h + 20; yy > y; yy -= 6) {
+        path.lineTo(170.0 - 12 + k * 4.4 + math.sin(yy * 0.06 - t * 4) * 5, yy);
       }
-      c.drawPath(path, stroke(color, 4.4, 0.6));
+      c.drawPath(
+          path,
+          _line
+            ..strokeWidth = 4.8
+            ..color = Color.lerp(Palette.rainbow[k], const Color(0xFFB89A6E), 0.45)!);
     }
-    final bob = math.sin(t * 2.5) * 5;
-    bunny(Offset(160, 108 + bob), 70, ink(), wings: true, flap: 0.5 + 0.5 * math.sin(t * 9));
-    // something like a question mark, fading in and out
-    final q = 0.4 + 0.4 * math.sin(t * 1.5);
-    c.drawCircle(Offset(214, 40 + bob), 2.5, ink(q));
-    c.drawArc(Rect.fromCircle(center: Offset(214, 26 + bob), radius: 7), math.pi, math.pi * 1.4, false, stroke(_ink, 2, q));
+    // it looks one way, then the other
+    final look = t > 4.6 && (t * 0.8).floor().isEven;
+    bunny(art.memory, 170, y, 2.6, wings: true, flap: (t * 3) % 1, flip: look, blink: blinking(0));
+    popup(2, () => cutout(_cloud(60, 270, 1.4), const Color(0xFFE8D7B0), shadow: 0.2), start: 1.2);
+    if (t > 4.8) {
+      final a = at(4.8, 5.4);
+      PixelFont.draw(c, '?', 214, y - 86 - 6 * a, 3, _ink.withValues(alpha: a));
+    }
+  }
+
+  Path _cloud(double x, double y, double s) {
+    final p = Path();
+    for (final (dx, dy, r) in const [(0.0, 0.0, 22.0), (24.0, -8.0, 26.0), (50.0, 0.0, 20.0), (26.0, 8.0, 22.0)]) {
+      p.addOval(Rect.fromCircle(center: Offset(x + dx * s + cam * 0.3, y + dy * s), radius: r * s));
+    }
+    return p;
   }
 
   void _oak() {
-    stars(6, 3, 0.5);
-    hill(118, wash());
-    oakTree(const Offset(170, 128), 96, ink());
-    // the burrow door among the roots, its window glowing and flickering
-    final flicker = 0.7 + 0.3 * math.sin(t * 7) * math.sin(t * 3.1);
-    c.drawOval(const Rect.fromLTWH(150, 116, 34, 22), ink());
-    c.drawOval(const Rect.fromLTWH(157, 120, 20, 14), glow(flicker));
-    // fireflies drifting up
-    for (var i = 0; i < 6; i++) {
-      final y = 140 - ((t * 14 + i * 23) % 90);
-      final x = 120 + i * 18 + math.sin(t * 2 + i) * 8;
-      c.drawCircle(Offset(x, y), 1.8, glow(0.8 * (0.5 + 0.5 * math.sin(t * 5 + i))));
+    const ground = _h * 0.8;
+    sky(_paperLight, const Color(0xFFCFB284));
+    stars(8, 3, 0.5);
+    popup(0, () => cutout(hills(_h * 0.55, 14, 1), const Color(0xFFBF9E6E), shadow: 0.2));
+    popup(1, () {
+      c.save();
+      c.translate(cam * 0.4, 0);
+      cutout(oakTree(_w * 0.42, ground, 1.15), const Color(0xFF5C4128), rim: false);
+      // the burrow door: its window glows, then the door swings open and light spills out
+      final open = at(3.2, 4.2);
+      c.drawOval(Rect.fromCenter(center: Offset(_w * 0.42, ground - 12), width: 44, height: 30), _fill..color = _ink);
+      final flicker = 0.65 + 0.35 * math.sin(t * 7) * math.sin(t * 3.1);
+      c.drawOval(Rect.fromCenter(center: Offset(_w * 0.42, ground - 13), width: 26 + 14 * open, height: 18 + 8 * open),
+          _fill..color = Color.fromRGBO(255, 214, 140, flicker));
+      if (open > 0) {
+        c.drawPath(
+            Path()
+              ..moveTo(_w * 0.42 - 16, ground - 4)
+              ..lineTo(_w * 0.42 + 16, ground - 4)
+              ..lineTo(_w * 0.42 + 70, ground + 30)
+              ..lineTo(_w * 0.42 - 70, ground + 30)
+              ..close(),
+            _fill..color = Color.fromRGBO(255, 214, 140, 0.25 * open));
+        // little ones passing the light
+        for (var i = 0; i < 3; i++) {
+          final x = _w * 0.42 - 14 + ((t - 4.2) * 18 + i * 10) % 28;
+          bunny(art.memoryShade, x, ground - 4, 0.7);
+        }
+      }
+      c.restore();
+    });
+    popup(2, () => cutout(hills(ground, 4, 5), const Color(0xFF8F6C45)));
+    popup(3, () => cutout(grass(16), const Color(0xFF2C1D12), shadow: 0.5));
+    // fireflies
+    for (var i = 0; i < 7; i++) {
+      final y = _h - 40 - ((t * 14 + i * 23) % 140);
+      _fill.color = Color.fromRGBO(255, 230, 160, 0.8 * (0.5 + 0.5 * math.sin(t * 5 + i)) * at(1.5, 2.5));
+      c.drawCircle(Offset(60.0 + i * 36 + math.sin(t * 2 + i) * 8, y), 2, _fill);
     }
   }
 
   void _seven() {
-    c.drawRect(const Rect.fromLTWH(0, 128, _w, 42), wash());
-    const sizes = [62.0, 58.0, 55.0, 52.0, 48.0, 44.0, 30.0];
-    var x = 40.0;
+    const ground = _h * 0.8;
+    const xs = [0.36, 0.46, 0.55, 0.64, 0.73, 0.82, 0.92];
+    const sizes = [1.9, 1.8, 1.75, 1.7, 1.6, 1.5, 1.15];
+    final focus = at(5.4, 7.2);
+    final pip = _w * xs[6];
+    // the camera leans in on the smallest
+    c.translate(pip, ground - 30);
+    c.scale(1 + 0.18 * focus);
+    c.translate(-pip - (pip - _w / 2) * 0.12 * focus, -(ground - 30));
+    sky(_paperLight, const Color(0xFFCFB284));
+    c.drawCircle(Offset(_w * 0.8, _h * 0.22), 26, _fill..color = const Color(0xB3FAECC8));
+    popup(0, () => cutout(hills(_h * 0.5, 14, 1), const Color(0xFFBF9E6E), shadow: 0.2));
+    popup(1, () => cutout(oakTree(_w * 0.22, ground, 1), const Color(0xFF5C4128), rim: false));
+    popup(2, () => cutout(hills(ground, 4, 5), const Color(0xFF8F6C45)));
+    // the seven hop in from the right, one after another
     for (var i = 0; i < 7; i++) {
-      final s = sizes[i];
-      final hop = i == 6 ? math.max(0.0, math.sin(t * 6)) * 14 : math.max(0.0, math.sin(t * 2 + i)) * 2;
-      bunny(Offset(x, 132 - hop), s, ink(i == 6 ? 1 : 0.8));
-      x += s * 0.62 + 6;
+      final start = 2.4 + i * 0.32, k = ((t - start) / 0.9).clamp(0.0, 1.0);
+      if (k <= 0) continue;
+      final x = _w + 50 + (_w * xs[i] - _w - 50) * Curves.easeOutCubic.transform(k);
+      var hop = (math.sin(k * math.pi * 2)).abs() * 16 * (1 - k * 0.6);
+      if (i == 6 && t > 5.6 && t < 6.9) hop = math.max(0.0, math.sin((t - 5.6) * 7)) * 10;
+      bunny(art.memory, x + cam * 0.6, ground + 4 - hop, sizes[i], blink: blinking(i * 0.7));
     }
-    // the smallest one is pointed out
-    final a = at(1, 1.8);
-    c.drawPath(
-        Path()
-          ..moveTo(x - 20, 46)
-          ..lineTo(x - 26, 58)
-          ..lineTo(x - 14, 58)
-          ..close(),
-        ink(a));
+    popup(3, () => cutout(grass(16), const Color(0xFF2C1D12), shadow: 0.5));
+    // an ink circle drawn around the smallest: this one is Pip
+    if (t > 5.3) {
+      final k = at(5.3, 6.4);
+      final ring = Path();
+      for (var a = 0.0; a <= math.pi * 2.15 * k; a += 0.08) {
+        final r = 30 + math.sin(a * 3) * 2;
+        final p = Offset(pip + cam * 0.6 + math.cos(a - 1.4) * r, ground - 18 + math.sin(a - 1.4) * r * 1.1);
+        a == 0 ? ring.moveTo(p.dx, p.dy) : ring.lineTo(p.dx, p.dy);
+      }
+      c.drawPath(
+          ring,
+          _line
+            ..strokeWidth = 2.2
+            ..color = _redInk);
+    }
   }
 
   void _rainbows() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), wash(0.35));
-    // Mama painting an arch on the burrow wall
-    final paint = at(0.2, 3.2);
-    arc(const Offset(150, 140), 95, 8, 0.9, progress: paint);
+    const floor = _h * 0.82;
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFFC9AE84));
+    popup(0, () => cutout(Path()..addRect(const Rect.fromLTWH(-20, floor, _w + 40, _h)), const Color(0xFF7A5A3A)));
+    // Mama paints an arch on the burrow wall, stroke by stroke
+    final paint = at(2.2, 5.2);
+    rainbow(const Offset(_w * 0.42, floor - 10), 120, 9, 0.95, progress: paint);
     final angle = math.pi + math.pi * paint;
-    final brush = const Offset(150, 140) + Offset(math.cos(angle) * 75, math.sin(angle) * 75);
-    bunny(Offset(brush.dx + 18, 160), 66, ink());
-    c.drawLine(brush, Offset(brush.dx + 12, brush.dy + 26), stroke(_ink, 2.5));
-    // little ones watching
-    bunny(const Offset(270, 166), 34, ink(0.8));
-    bunny(const Offset(292, 166), 28, ink(0.8));
+    final brush = const Offset(_w * 0.42, floor - 10) + Offset(math.cos(angle) * 90, math.sin(angle) * 90);
+    bunny(art.memory, brush.dx + 24, floor + 2, 2.6, blink: blinking(0.3));
+    c.drawLine(brush, brush + const Offset(16, 30), _line
+      ..strokeWidth = 2.5
+      ..color = _ink);
+    // the little ones hop over to watch
+    for (var i = 0; i < 2; i++) {
+      final k = Curves.easeOutCubic.transform(at(4.6 + i * 0.4, 5.6 + i * 0.4));
+      if (k <= 0) continue;
+      bunny(art.memory, _w + 30 - k * (90 - i * 26), floor + 2 - (math.sin(k * math.pi * 3)).abs() * 10 * (1 - k), 1.4 - i * 0.2,
+          blink: blinking(1.0 + i));
+    }
   }
 
+  // ---------- Twilight ----------
+
   void _sunset() {
-    final sink = at(0, 5);
-    c.drawCircle(Offset(160, 104 + sink * 40), 34, glow());
-    for (var i = 0; i < 5; i++) {
-      c.drawLine(Offset(0, 90.0 + i * 9), Offset(_w, 90.0 + i * 9), stroke(_wash, 2, 0.5));
+    sky(const Color(0xFFE6C796), const Color(0xFFC78E6A));
+    final sink = Curves.easeInOut.transform(at(1.6, 6.5));
+    c.drawCircle(Offset(_w * 0.55, _h * 0.48 + sink * 120), 40, _fill..color = const Color(0xFFF7DEA8));
+    for (var i = 0; i < 4; i++) {
+      c.drawLine(Offset(0, _h * 0.42 + i * 10), Offset(_w, _h * 0.42 + i * 10), _line
+        ..strokeWidth = 2
+        ..color = const Color(0x40B07850));
     }
-    hill(120, ink());
-    bunny(const Offset(96, 136), 34, ink());
+    popup(0, () => cutout(hills(_h * 0.62, 12, 2), const Color(0xFF8A5A3E), shadow: 0.25));
+    popup(1, () => cutout(hills(_h * 0.76, 6, 7), const Color(0xFF4A2E1E)));
+    bunny(art.memoryShade, _w * 0.25, _h * 0.77, 1.7, flip: true);
+    if (t > 6.2) {
+      final a = at(6.2, 7);
+      c.drawCircle(const Offset(_w * 0.8, _h * 0.2), 2.2, _fill..color = _glow.withValues(alpha: a));
+    }
   }
 
   void _longShadows() {
-    hill(122, wash());
-    oakTree(const Offset(230, 134), 90, ink());
-    // the oak's shadow stretching further than any shadow should
-    final grow = at(0, 5);
+    const ground = _h * 0.72;
+    sky(const Color(0xFFE2BE8C), const Color(0xFFB98260));
+    popup(0, () => cutout(hills(ground, 5, 3), const Color(0xFF9A7048), shadow: 0.2));
+    popup(1, () => cutout(oakTree(_w * 0.72, ground, 0.9), const Color(0xFF4A3020), rim: false));
+    // the oak's shadow stretches further than any shadow should
+    final grow = Curves.easeIn.transform(at(2.4, 6.5));
     c.drawPath(
         Path()
-          ..moveTo(222, 134)
-          ..lineTo(240, 134)
-          ..lineTo(240 - 60 - 200 * grow, 168)
-          ..lineTo(190 - 60 - 200 * grow, 168)
+          ..moveTo(_w * 0.72 - 14, ground)
+          ..lineTo(_w * 0.72 + 14, ground)
+          ..lineTo(_w * 0.72 - 40 - 300 * grow, _h + 10)
+          ..lineTo(_w * 0.72 - 110 - 300 * grow, _h + 10)
           ..close(),
-        ink(0.75));
-    bunny(const Offset(130, 132), 44, ink()); // Papa
-    bunny(const Offset(104, 132), 26, ink()); // Pip
+        _fill..color = const Color(0xC0201208));
+    // Papa turns to look at it; Pip hides behind him
+    bunny(art.memory, _w * 0.36, ground + 2, 2.4, flip: t > 4.4, blink: blinking(0.2));
+    bunny(art.memory, _w * 0.26, ground + 2, 1.4, blink: blinking(1.4));
   }
 
   void _door() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), wash(0.4));
-    // a round door, boarded shut
-    c.drawCircle(const Offset(160, 96), 56, ink(0.85));
-    c.drawCircle(const Offset(160, 96), 50, wash());
-    for (final y in const [74.0, 98.0, 122.0]) {
-      c.drawRect(Rect.fromLTWH(104, y, 112, 8), ink());
+    const floor = _h * 0.78;
+    var shake = 0.0;
+    for (final at in const [2.9, 3.4, 3.9]) {
+      if (t > at && t < at + 0.25) shake += (0.25 - (t - at)) * 30;
     }
-    // the dark creeping in under it and rising, slow, like water
-    final rise = at(0.5, 6);
-    final level = 170 - rise * 80;
-    final path = Path()..moveTo(0, _h);
-    for (var x = 0.0; x <= _w; x += 8) {
-      path.lineTo(x, level + math.sin(x * 0.06 + t * 2) * 4);
+    final f = (t * 60).floorToDouble();
+    c.translate((hash2(f, 1) - 0.5) * shake, (hash2(f, 2) - 0.5) * shake);
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFFB38A72));
+    _fill.color = const Color(0x38462320);
+    for (var x = -10.0; x < _w + 20; x += 18) {
+      c.drawRect(Rect.fromLTWH(x + cam * 0.2, -20, 6, _h + 40), _fill);
     }
-    path
-      ..lineTo(_w, _h)
-      ..close();
-    c.drawPath(path, ink(0.9));
+    popup(0, () {
+      for (final (x, y, scratched) in const [(_w * 0.17, 70.0, false), (_w * 0.83, 64.0, true)]) {
+        _portrait(Offset(x + cam * 0.3, y), scratched);
+      }
+    });
+    final dx = _w / 2 + cam * 0.5, dy = floor - 70;
+    const dr = 74.0;
+    popup(1, () {
+      final ring = Path()
+        ..addArc(Rect.fromCircle(center: Offset(dx, dy), radius: dr), math.pi, math.pi)
+        ..lineTo(dx + dr, floor)
+        ..lineTo(dx - dr, floor)
+        ..close();
+      cutout(ring, const Color(0xFF4A2E1C));
+      final inner = Path()
+        ..addArc(Rect.fromCircle(center: Offset(dx, dy), radius: dr - 9), math.pi, math.pi)
+        ..lineTo(dx + dr - 9, floor)
+        ..lineTo(dx - dr + 9, floor)
+        ..close();
+      c.drawPath(inner, _fill..color = const Color(0xFF6A4630));
+    });
+    popup(2, () => cutout(Path()..addRect(const Rect.fromLTWH(-20, floor, _w + 40, _h)), const Color(0xFF5A3A26)));
+    // the boards slam on, one, two, three
+    for (final (at, rot, oy) in const [(2.9, -0.12, -40.0), (3.4, 0.08, 0.0), (3.9, -0.05, 40.0)]) {
+      final k = Curves.easeOutBack.transform(((t - at) / 0.3).clamp(0.0, 1.0));
+      if (t < at) continue;
+      c.save();
+      c.translate(dx, dy + oy + 20);
+      c.rotate(rot);
+      c.scale(1.6 - 0.6 * k);
+      cutout(Path()..addRect(const Rect.fromLTWH(-dr - 16, -9, (dr + 16) * 2, 18)), const Color(0xFF7C5838), shadow: 0.45);
+      c.restore();
+      if (t - at < 0.6) {
+        for (var j = 0; j < 10; j++) {
+          final a = hash2(at, j.toDouble()) * math.pi * 2, d = (t - at) * 60 * (0.5 + hash2(j.toDouble(), at));
+          c.drawCircle(Offset(dx + math.cos(a) * (dr + d), dy + oy + 20 + math.sin(a) * d * 0.4), 2,
+              _fill..color = Color.fromRGBO(230, 210, 170, 0.6 * (1 - (t - at) / 0.6)));
+        }
+      }
+    }
+    // Pip by the wall, trembling once the dark comes; a candle that will go out
+    bunny(art.memory, _w * 0.12 + (t > 4.6 ? math.sin(t * 40) * 0.8 : 0), floor + 2, 1.5, blink: t % 2.6 < 0.1);
+    final out = at(6.6, 7.0);
+    c.drawRect(const Rect.fromLTWH(_w * 0.88, floor - 22, 8, 22), _fill..color = const Color(0xFFE8D6AE));
+    if (out < 1) {
+      final fl = 0.8 + 0.2 * math.sin(t * 13);
+      c.drawOval(Rect.fromCenter(center: Offset(_w * 0.88 + 4, floor - 30), width: 8, height: 16 * fl),
+          _fill..color = Color.fromRGBO(255, 200, 110, (1 - out) * fl));
+    }
+    // the dark seeps under the door and rises, slow, like water; eyes open in it
+    final seep = at(4.4, 8.5);
+    if (seep > 0) {
+      final level = floor + 4 - seep * _h * 0.5, spread = (seep * 3).clamp(0.0, 1.0) * (_w / 2 + 30);
+      final water = Path()..moveTo(dx - spread, _h + 10);
+      for (var x = dx - spread; x <= dx + spread; x += 6) {
+        water.lineTo(x, level + math.sin(x * 0.07 + t * 2) * 3 + math.pow((x - dx).abs() / spread, 3) * 14);
+      }
+      water
+        ..lineTo(dx + spread, _h + 10)
+        ..close();
+      c.drawPath(water, _fill..color = const Color(0xF00E0806));
+      _eyesInDark(6.4, const [(0.4, 0.86), (0.62, 0.9), (0.75, 0.83)]);
+    }
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = Color.fromRGBO(20, 10, 6, out * 0.35));
+  }
+
+  void _portrait(Offset at, bool scratched) {
+    c.save();
+    c.translate(at.dx, at.dy);
+    c.rotate(math.sin(t * 0.8 + at.dx) * 0.03);
+    c.drawLine(const Offset(0, -30), const Offset(-10, -12), _line
+      ..strokeWidth = 0.8
+      ..color = _ink);
+    c.drawLine(const Offset(0, -30), const Offset(10, -12), _line);
+    cutout(Path()..addOval(Rect.fromCenter(center: const Offset(0, 10), width: 36, height: 46)), const Color(0xFF6E4A22));
+    c.drawOval(Rect.fromCenter(center: const Offset(0, 10), width: 28, height: 38), _fill..color = const Color(0xFFCBB896));
+    bunny(art.memory, 0, 26, 1.0);
+    if (scratched) {
+      for (var i = 0; i < 5; i++) {
+        c.drawLine(Offset(-9, -2.0 + i * 3), Offset(9, 2.0 + i * 3), _line
+          ..strokeWidth = 1.4
+          ..color = _redInk);
+      }
+    }
+    c.restore();
+  }
+
+  void _eyesInDark(double from, List<(double, double)> spots) {
+    for (var i = 0; i < spots.length; i++) {
+      final (ex, ey) = spots[i];
+      if ((t + i * 1.3) % 3.1 < 0.15) continue;
+      _fill.color = const Color(0xFFE8DDFF).withValues(alpha: 0.85 * at(from + i * 0.4, from + 0.6 + i * 0.4));
+      for (final s in const [-1.0, 1.0]) {
+        c.drawOval(Rect.fromCenter(center: Offset(_w * ex + s * 5, _h * ey), width: 5.2, height: 3.6), _fill);
+      }
+    }
   }
 
   void _hiding() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), wash(0.3));
-    arc(const Offset(90, 170), 80, 7, 0.8);
-    arc(const Offset(250, 170), 60, 6, 0.6);
-    // Pip curled up small, trembling
-    final shake = math.sin(t * 30) * 0.8;
-    c.drawOval(Rect.fromLTWH(140 + shake, 138, 40, 26), ink());
-    c.drawCircle(Offset(176 + shake, 140), 10, ink());
-    c.drawOval(Rect.fromLTWH(170 + shake, 128, 18, 6), ink());
-    // calls from the dark, rings fading out
+    const floor = _h * 0.8;
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFFC4A07E));
+    popup(0, () {
+      rainbow(const Offset(_w * 0.3, floor), 100, 8, 0.8);
+      rainbow(const Offset(_w * 0.78, floor), 70, 6, 0.6);
+    });
+    popup(1, () => cutout(Path()..addRect(const Rect.fromLTWH(-20, floor, _w + 40, _h)), const Color(0xFF6A4A30)));
+    // a dark doorway on the right where the calls come from
+    c.drawRRect(RRect.fromRectAndCorners(const Rect.fromLTWH(_w * 0.86, floor - 110, 60, 110), topLeft: const Radius.circular(30)),
+        _fill..color = const Color(0xFF140C08));
+    // Pip curled up small in the corner, trembling
+    bunny(art.memory, _w * 0.12 + math.sin(t * 30) * 0.7, floor + 2, 1.5, blink: true, eyeLid: const Color(0xFFC7A878));
+    // the calls: "PIP?" from the dark, fading each time
     for (var i = 0; i < 3; i++) {
-      final age = (t * 0.8 + i / 3) % 1;
-      c.drawCircle(const Offset(300, 40), 10 + age * 60, stroke(_ink, 2, 0.6 * (1 - age)));
+      final start = 2.4 + i * 1.6, age = t - start;
+      if (age < 0 || age > 1.4) continue;
+      final a = math.sin(math.pi * age / 1.4) * (1 - i * 0.25);
+      PixelFont.draw(c, 'PIP?', _w * 0.66 - i * 20, floor - 80 - age * 10, 2, _ink.withValues(alpha: a));
     }
   }
 
+  // ---------- Starfall (Ashfall) ----------
+
   void _constellation() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.85));
-    stars(30, 11, 0.7);
-    // the Bunny drawing itself, star by star
-    const pts = [Offset(140, 40), Offset(146, 74), Offset(166, 36), Offset(168, 74), Offset(132, 94), Offset(155, 112), Offset(180, 94)];
+    sky(const Color(0xFF1E140E), const Color(0xFF3A2818));
+    stars(40, 11, 0.7);
+    const pts = [Offset(150, 50), Offset(156, 96), Offset(180, 44), Offset(182, 96), Offset(140, 122), Offset(166, 146), Offset(194, 122)];
     const lines = [(0, 1), (2, 3), (1, 3), (1, 4), (4, 5), (5, 6), (6, 3)];
-    final shown = at(0.3, 4) * lines.length;
+    final shown = at(1.8, 5) * lines.length;
     for (var i = 0; i < lines.length; i++) {
       final f = (shown - i).clamp(0.0, 1.0);
       if (f <= 0) continue;
       final (a, b) = lines[i];
-      c.drawLine(pts[a], Offset.lerp(pts[a], pts[b], f)!, stroke(_glow, 1.4, 0.8));
+      c.drawLine(pts[a], Offset.lerp(pts[a], pts[b], f)!, _line
+        ..strokeWidth = 1.4
+        ..color = const Color(0xCCF7EBC8));
     }
     for (final p in pts) {
-      c.drawCircle(p, 2.6, glow());
+      c.drawCircle(p, 2.8, _fill..color = _glow);
     }
-    // Mama and Pip below, looking up
-    hill(140, ink());
-    bunny(const Offset(60, 150), 40, wash());
-    bunny(const Offset(86, 150), 22, wash());
+    if (t > 5.4 && t < 6.4) {
+      final k = (t - 5.4) / 1.0;
+      final head = Offset(40 + k * 260, 30 + k * 60);
+      c.drawLine(head - const Offset(40, 9), head, _line
+        ..strokeWidth = 1.6
+        ..color = _glow.withValues(alpha: math.sin(k * math.pi)));
+    }
+    popup(0, () => cutout(hills(_h * 0.78, 10, 4), const Color(0xFF120B07), shadow: 0.5, rim: false));
+    bunny(art.memoryShade, _w * 0.28, _h * 0.8, 2.2);
+    bunny(art.memoryShade, _w * 0.37, _h * 0.8, 1.3);
   }
 
   void _sevenShadows() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), wash(0.5));
-    // an empty room; seven shadows on the wall, swaying
-    var x = 36.0;
-    const sizes = [60.0, 56.0, 53.0, 50.0, 46.0, 42.0, 28.0];
+    const floor = _h * 0.8;
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFFB79878));
+    popup(0, () => cutout(Path()..addRect(const Rect.fromLTWH(-20, floor, _w + 40, _h)), const Color(0xFF6A4A30)));
+    // seven shadows on the wall, swaying; one by one they turn to look at Pip
+    const sizes = [2.6, 2.5, 2.4, 2.3, 2.15, 2.0, 1.4];
+    var x = 30.0;
     for (var i = 0; i < 7; i++) {
-      final sway = math.sin(t * 1.3 + i) * 2;
-      final alpha = 0.35 + 0.25 * (0.5 + 0.5 * math.sin(t * 2 + i * 1.7));
-      bunny(Offset(x + sway, 150), sizes[i], ink(alpha));
-      x += sizes[i] * 0.6 + 7;
+      final turned = t > 5.0 + i * 0.25;
+      bunny(art.memoryShade, x + math.sin(t * 1.3 + i) * 2, floor - 30, sizes[i],
+          flip: turned, alpha: 0.4 + 0.25 * (0.5 + 0.5 * math.sin(t * 2 + i * 1.7)));
+      x += sizes[i] * 16 + 4;
     }
-    c.drawRect(const Rect.fromLTWH(0, 150, _w, 20), ink(0.7));
+    final k = Curves.easeOutCubic.transform(at(2.6, 4.4));
+    bunny(art.memory, _w + 30 - k * 70, floor + 2, 1.5, blink: blinking(0.5));
   }
 
   void _crying() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.8));
-    stars(14, 5, 0.5);
-    moon(const Offset(240, 46), 26);
-    hill(126, wash(0.9));
-    bunny(const Offset(110, 136), 40, ink(), ears: 0.5);
-    // tears falling
+    // three nights: the sky goes dark three times
+    final night = 0.5 + 0.5 * math.cos((t - 1) * 1.6);
+    sky(Color.lerp(const Color(0xFF3A2818), const Color(0xFF120B07), night)!, const Color(0xFF2A1C12));
+    stars(16, 5, 0.5 * night);
+    moonDisc(const Offset(_w * 0.72, _h * 0.26), 30);
+    final answer = at(5.6, 6.2);
+    if (answer > 0) {
+      c.drawCircle(const Offset(_w * 0.72, _h * 0.26), 30 + 24 * (0.5 + 0.5 * math.sin(t * 4)), _line
+        ..strokeWidth = 2.5
+        ..color = _glow.withValues(alpha: 0.7 * answer));
+    }
+    popup(0, () => cutout(hills(_h * 0.72, 12, 2), const Color(0xFF6E5034), shadow: 0.3));
+    bunny(art.memory, _w * 0.32, _h * 0.74, 2.0, blink: true, eyeLid: const Color(0xFFC7A878));
     for (var i = 0; i < 2; i++) {
       final f = (t * 0.9 + i * 0.5) % 1;
-      c.drawCircle(Offset(114 + i * 6, 112 + f * 22), 1.8, glow(1 - f));
+      c.drawCircle(Offset(_w * 0.32 - 6 + i * 12, _h * 0.74 - 34 + f * 22), 1.8, _fill..color = _glow.withValues(alpha: 1 - f));
     }
-    // the moon answers: three pulses
-    final answer = at(3, 3.4);
-    if (answer > 0) c.drawCircle(const Offset(240, 46), 26 + 18 * (0.5 + 0.5 * math.sin(t * 4)), stroke(_glow, 2, answer * 0.7));
+    for (var n = 0; n < 3; n++) {
+      if (t > 2 + n * 1.2) {
+        _line
+          ..strokeWidth = 2
+          ..color = _glow.withValues(alpha: 0.8);
+        c.drawLine(Offset(24.0 + n * 9, 24), Offset(24.0 + n * 9, 42), _line);
+      }
+    }
   }
 
   void _moonCalls() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.85));
-    moon(const Offset(160, 40), 30);
-    // a beam reaching down to the little bunny
-    final reach = at(0.5, 2.5);
+    sky(const Color(0xFF1A110C), const Color(0xFF2E2016));
+    stars(20, 8, 0.5);
+    moonDisc(const Offset(_w / 2, 58), 36);
+    final reach = Curves.easeOut.transform(at(2.0, 4.0));
     c.drawPath(
         Path()
-          ..moveTo(146, 60)
-          ..lineTo(174, 60)
-          ..lineTo(174 + 30 * reach, 60 + 100 * reach)
-          ..lineTo(146 - 30 * reach, 60 + 100 * reach)
+          ..moveTo(_w / 2 - 20, 80)
+          ..lineTo(_w / 2 + 20, 80)
+          ..lineTo(_w / 2 + 20 + 50 * reach, 80 + 210 * reach)
+          ..lineTo(_w / 2 - 20 - 50 * reach, 80 + 210 * reach)
           ..close(),
-        glow(0.22));
-    bunny(Offset(160, 160 - 6 * reach), 34, wash());
+        _fill..color = const Color(0x38F7EBC8));
+    popup(0, () => cutout(hills(_h * 0.85, 6, 3), const Color(0xFF120B07), shadow: 0.5, rim: false));
+    // Pip is lifted, just a little, into the light
+    final lift = at(4.6, 7) * 26;
+    bunny(art.memory, _w / 2, _h * 0.86 - lift + math.sin(t * 2) * (lift > 0 ? 2 : 0), 1.8, blink: blinking(0));
   }
 
+  // ---------- Runelight (The Hollow) ----------
+
   void _runes() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.8));
-    // the tunnel walls; an old painted rainbow turning into runes
-    c.drawRect(const Rect.fromLTWH(0, 0, 70, _h), wash(0.6));
-    c.drawRect(const Rect.fromLTWH(250, 0, 70, _h), wash(0.6));
-    final turn = at(1, 4);
-    arc(const Offset(35, 100), 30, 4, 1 - turn);
-    final rune = stroke(Palette.glimmer, 2, turn);
-    c.drawLine(const Offset(35, 70), const Offset(35, 110), rune);
-    c.drawLine(const Offset(23, 82), const Offset(35, 70), rune);
-    c.drawLine(const Offset(47, 82), const Offset(35, 70), rune);
-    arc(const Offset(285, 70), 26, 3.5, 0.9);
-    bunny(Offset(160, 130 + math.sin(t * 2.5) * 4), 44, wash(), wings: true, flap: 0.5 + 0.5 * math.sin(t * 9));
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFF1A130E));
+    popup(0, () {
+      cutout(Path()..addRect(const Rect.fromLTWH(-20, -20, 90, _h + 40)), const Color(0xFF4A3A2C), shadow: 0.5);
+      cutout(Path()..addRect(const Rect.fromLTWH(_w - 70, -20, 90, _h + 40)), const Color(0xFF4A3A2C), shadow: 0.5);
+    });
+    // Mama's painted rainbows, worn into scratched runes
+    final turn = at(2.6, 5);
+    for (final (x, y) in const [(35.0, 110.0), (_w - 35, 190.0), (35.0, 260.0)]) {
+      rainbow(Offset(x, y), 26, 3.5, 1 - turn);
+      _line
+        ..strokeWidth = 2
+        ..color = const Color(0xFFE6E0D2).withValues(alpha: 0.85 * turn);
+      c.drawLine(Offset(x, y - 30), Offset(x, y + 4), _line);
+      c.drawLine(Offset(x - 12, y - 18), Offset(x, y - 30), _line);
+      c.drawLine(Offset(x + 12, y - 18), Offset(x, y - 30), _line);
+    }
+    bunny(art.memory, _w / 2, _h * 0.62 + math.sin(t * 2.5) * 5, 2.2, wings: true, flap: (t * 3) % 1, blink: blinking(0));
   }
 
   void _bargain() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.85));
-    moon(const Offset(160, 36), 26);
-    // wings drifting down from the moon onto the bunny
-    final fall = at(0.3, 3);
-    final wingsAt = Offset.lerp(const Offset(160, 60), const Offset(160, 118), fall)!;
-    if (fall < 1) {
-      for (final side in const [-1.0, 1.0]) {
-        c.drawOval(Rect.fromCenter(center: wingsAt + Offset(side * 18, 0), width: 26, height: 12), glow(0.9));
+    sky(const Color(0xFF120B07), const Color(0xFF241810));
+    stars(20, 9, 0.4);
+    moonDisc(const Offset(_w / 2, 60), 34);
+    // a pair of wings drifts down from the moon and settles on Pip
+    final fall = Curves.easeInOut.transform(at(2.0, 4.6));
+    final settled = fall >= 1;
+    if (!settled) {
+      final y = 100 + fall * 120;
+      for (final s in const [-1.0, 1.0]) {
+        c.drawOval(Rect.fromCenter(center: Offset(_w / 2 + s * 24, y), width: 34, height: 14), _fill..color = const Color(0xE6F7EBC8));
       }
     }
-    bunny(const Offset(160, 160), 44, wash(), wings: fall >= 1, flap: 0.5 + 0.5 * math.sin(t * 9));
-    // a thin thread from the bunny back to the moon: the price
-    if (fall >= 1) c.drawLine(const Offset(160, 120), const Offset(160, 62), stroke(_glow, 0.8, 0.5 + 0.3 * math.sin(t * 3)));
+    popup(0, () => cutout(hills(_h * 0.86, 5, 6), const Color(0xFF120B07), shadow: 0.5, rim: false));
+    bunny(art.memory, _w / 2, _h * 0.86, 2.0, wings: settled, flap: (t * 3) % 1, blink: blinking(0.4));
+    // a thread from Pip back up to the moon: the price
+    if (settled) {
+      c.drawLine(Offset(_w / 2, _h * 0.86 - 52), const Offset(_w / 2, 94), _line
+        ..strokeWidth = 1
+        ..color = const Color(0xFFC0303E).withValues(alpha: 0.5 + 0.3 * math.sin(t * 3)));
+    }
   }
 
   void _forgetting() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.85));
-    moon(const Offset(250, 34), 22);
-    bunny(const Offset(110, 156), 50, wash(), wings: true, flap: 0.3);
-    // scraps of memory torn away and drawn up into the moon
-    for (var i = 0; i < 7; i++) {
-      final f = (t * 0.35 + i / 7) % 1;
-      final p = Offset.lerp(const Offset(110, 110), const Offset(250, 34), f)! + Offset(0, math.sin(f * 9 + i) * 14);
+    sky(const Color(0xFF120B07), const Color(0xFF231710));
+    moonDisc(const Offset(_w * 0.8, 52), 30);
+    popup(0, () => cutout(hills(_h * 0.88, 5, 2), const Color(0xFF120B07), shadow: 0.5, rim: false));
+    const from = Offset(_w * 0.3, _h * 0.6);
+    bunny(art.memory, from.dx, from.dy + 40, 2.0, wings: true, flap: 0.3, blink: blinking(0.9));
+    // little photographs torn away from Pip and drawn up into the moon
+    for (var i = 0; i < 8; i++) {
+      final f = ((t - 1.8) * 0.3 + i / 8) % 1;
+      if (t < 1.8 + i * 0.4) continue;
+      final p = Offset.lerp(from, const Offset(_w * 0.8, 52), f)! + Offset(0, math.sin(f * 9 + i) * 16);
       c.save();
       c.translate(p.dx, p.dy);
       c.rotate(f * 6 + i);
-      c.drawRect(Rect.fromCenter(center: Offset.zero, width: 10 * (1 - f * 0.6), height: 7 * (1 - f * 0.6)),
-          Paint()..color = _paper.withValues(alpha: 1 - f * 0.5));
+      final s = 1 - f * 0.7;
+      c.drawRect(Rect.fromCenter(center: Offset.zero, width: 14 * s, height: 11 * s), _fill..color = _paperLight);
+      c.drawRect(Rect.fromCenter(center: const Offset(0, -1), width: 10 * s, height: 6 * s), _fill..color = const Color(0xFF8A6A48));
       c.restore();
     }
   }
 
   void _brothers() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.92));
-    // the Hollow Ones in the dark: stitched plush bunnies, one eye glowing, grinning
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFF1C130D));
+    // a sliver of moonlight across the floor, so the family can be seen
+    c.drawPath(
+        Path()
+          ..moveTo(_w * 0.35, -20)
+          ..lineTo(_w * 0.65, -20)
+          ..lineTo(_w * 0.95, _h + 20)
+          ..lineTo(_w * 0.05, _h + 20)
+          ..close(),
+        _fill..color = const Color(0x24F7EBC8));
+    // the Hollow Ones, wearing the family's faces, step closer
+    final step = Curves.easeInOut.transform(at(2.4, 5.4));
     for (var i = 0; i < 4; i++) {
-      final x = 50.0 + i * 74;
-      final y = 74.0 + math.sin(t * 1.2 + i) * 4 + (hash01((t * 1.3).floor() * 5 + i) < 0.15 ? 2 : 0);
-      final body = Paint()..color = Palette.hollow;
-      c.drawOval(Rect.fromCenter(center: Offset(x - 7, y - 26), width: 8, height: 26), body); // upright ear
-      c.save();
-      c.translate(x + 7, y - 16);
-      c.rotate(0.9); // the torn ear, flopped over
-      c.drawOval(const Rect.fromLTWH(-4, -16, 8, 16), body);
-      c.restore();
-      c.drawCircle(Offset(x, y), 20, body);
-      c.drawCircle(Offset(x, y), 20, stroke(Palette.hollowRim, 1.6, 0.8));
-      final open = (t + i) % 3.5 > 0.15;
-      c.drawOval(Rect.fromCenter(center: Offset(x - 7, y - 3), width: 7, height: open ? 7 : 1), Paint()..color = Palette.hollowEye);
-      c.drawLine(Offset(x + 4, y - 6), Offset(x + 10, y), stroke(Palette.hollowRim, 1.4));
-      c.drawLine(Offset(x + 10, y - 6), Offset(x + 4, y), stroke(Palette.hollowRim, 1.4));
-      c.drawArc(Rect.fromCenter(center: Offset(x, y + 4), width: 22, height: 12), 0.2, math.pi - 0.4, false,
-          stroke(_paper, 1.4, 0.8));
+      final x = 50.0 + i * 80;
+      final twitch = hash2((t * 1.3).floorToDouble() * 5, i.toDouble()) < 0.15 ? 2.0 : 0.0;
+      bunny(art.memoryHollow, x + twitch, _h * 0.55 + step * 50, 2.2 + step * 0.5, wings: true, flap: (t * 2 + i) % 1);
+      final glare = 0.4 + 0.3 * math.sin(t * 5 + i) + 0.3 * step;
+      c.drawCircle(Offset(x - 4 * (2.2 + step * 0.5), _h * 0.55 + step * 50 - 14 * (2.2 + step * 0.5)), 7,
+          _fill..color = Color.fromRGBO(255, 50, 50, 0.25 * glare));
     }
-    bunny(const Offset(160, 166), 34, wash());
+    popup(0, () => cutout(hills(_h * 0.9, 4, 6), const Color(0xFF1E140E), shadow: 0.5, rim: false));
+    bunny(art.memory, _w / 2, _h * 0.96, 1.9, blink: blinking(0.2));
   }
 
+  // ---------- The Void ----------
+
   void _eclipse() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink());
-    stars(20, 21, 0.4);
-    final eaten = at(0.3, 5);
-    c.drawCircle(const Offset(160, 80), 46 + 10 * eaten, Paint()..color = Palette.corona.withValues(alpha: 0.25 * eaten));
-    moon(const Offset(160, 80), 40, bite: eaten);
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFF120B08));
+    stars(40, 4, 0.6);
+    moonDisc(Offset(_w * 0.6 + cam * 0.15, _h * 0.36), 60, eaten: at(2.6, 5.4));
+    popup(0, () => cutout(hills(_h * 0.68, 18, 8), const Color(0xFF2A1D15), shadow: 0.5));
+    popup(1, () {
+      final crag = Path()
+        ..moveTo(-20, _h + 10)
+        ..lineTo(-20, _h * 0.74)
+        ..lineTo(_w * 0.12, _h * 0.7)
+        ..lineTo(_w * 0.26, _h * 0.76)
+        ..lineTo(_w * 0.36, _h * 0.9)
+        ..lineTo(_w * 0.4, _h + 10)
+        ..close();
+      cutout(crag, const Color(0xFF1C130E), shadow: 0.6);
+      bunny(art.memory, _w * 0.17, _h * 0.71, 1.7, wings: true, flap: (t * 2) % 1);
+    });
   }
 
   void _feeding() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink());
-    moon(const Offset(160, 70), 36, bite: 1);
-    c.drawCircle(const Offset(160, 70), 40, stroke(Palette.corona, 3, 0.7));
-    // little lights (all that was lost) pulled spiralling in
-    for (var i = 0; i < 12; i++) {
-      final f = (t * 0.3 + i / 12) % 1;
-      final a = i * 0.9 + f * 5;
-      final r = 140 * (1 - f) + 36;
-      c.drawCircle(const Offset(160, 70) + Offset(math.cos(a) * r, math.sin(a) * r * 0.6), 2.4 * (1 - f) + 0.6,
-          glow(1 - f * 0.6));
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFF0E0806));
+    const m = Offset(_w / 2, _h * 0.38);
+    moonDisc(m, 52, eaten: 1);
+    // little lights, everything lost, pulled in spiralling
+    for (var i = 0; i < 30; i++) {
+      final f = ((t - 1.6) * 0.35 + i / 30) % 1;
+      final a = i * 1.7 + f * 6, r = (1 - f) * 240 + 52;
+      c.drawCircle(m + Offset(math.cos(a) * r, math.sin(a) * r * 0.6), 2.6 * (1 - f) + 0.6,
+          _fill..color = _glow.withValues(alpha: (1 - f) * at(1.6, 2.4)));
     }
+    popup(0, () => cutout(hills(_h * 0.86, 8, 2), const Color(0xFF1A110C), shadow: 0.5, rim: false));
+    bunny(art.memoryShade, _w * 0.2, _h * 0.87, 1.4, flip: true);
   }
 
   void _falling() {
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink(0.85));
-    // falling, over and over: down the frame and back in at the top
-    final f = (t * 0.6) % 1;
-    c.save();
-    c.translate(160, -30 + f * 230);
-    c.rotate(f * math.pi * 2);
-    bunny(const Offset(0, 20), 40, wash(), wings: true, flap: 1);
-    c.restore();
-    // a memory torn off at each fall
-    final scrap = Offset(160 + f * 60, 60 - f * 50);
-    c.drawRect(Rect.fromCenter(center: scrap, width: 9, height: 6), Paint()..color = _paper.withValues(alpha: 1 - f));
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFF120B08));
+    stars(30, 6, 0.4);
+    // Pip falls, over and over, a memory torn away each time
+    final f = ((t - 1.4) * 0.45) % 1;
+    if (t > 1.4) {
+      c.save();
+      c.translate(_w / 2 + math.sin(f * 4) * 30, -40 + f * (_h + 90));
+      c.rotate(f * math.pi * 3);
+      bunny(art.memory, 0, 30, 1.8, wings: true, flap: 1);
+      c.restore();
+      final scrap = Offset(_w / 2 + 30 + f * 60, 60 + f * (_h * 0.5) - f * f * 120);
+      c.drawRect(Rect.fromCenter(center: scrap, width: 12, height: 9), _fill..color = _paperLight.withValues(alpha: 1 - f));
+    }
   }
 
   void _name() {
-    // light breaking through: the dark pulls back from the middle
-    final open = at(0.3, 3);
-    c.drawRect(const Rect.fromLTWH(0, 0, _w, _h), ink());
-    c.drawCircle(const Offset(160, 90), 30 + 140 * open, glow(0.9));
-    c.drawCircle(const Offset(160, 90), 20 + 100 * open, Paint()..color = _paper);
-    arc(const Offset(160, 170), 70 * open + 1, 6, open);
-    bunny(Offset(160, 130 - 10 * math.sin(t * 2)), 64, ink(), wings: true, flap: 0.5 + 0.5 * math.sin(t * 8));
+    // light breaks through the dark from Pip
+    final open = Curves.easeOutCubic.transform(at(2.2, 5.2));
+    c.drawRect(const Rect.fromLTWH(-20, -20, _w + 40, _h + 40), _fill..color = const Color(0xFF120B08));
+    const centre = Offset(_w / 2, _h * 0.55);
+    c.drawCircle(centre, 30 + 260 * open, Paint()
+      ..shader = Gradient.radial(centre, 30 + 260 * open, [_glow, _paperLight, const Color(0x00EAD9B0)], [0, 0.7, 1]));
+    rainbow(const Offset(_w / 2, _h * 0.98), 40 + 110 * open, 9, open);
+    final wings = t > 3.6;
+    bunny(art.memory, _w / 2, _h * 0.72 - 10 * math.sin(t * 2), 2.8, wings: wings, flap: (t * 2.5) % 1, blink: blinking(0.6));
   }
 }

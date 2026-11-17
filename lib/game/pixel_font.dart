@@ -1,7 +1,7 @@
 import 'dart:ui';
 
-/// Built-in 5x7 pixel font: A-Z, 0-9, a little punctuation (! ? & ' : . , - +), and the lowercase letters of
-/// "going". Other lowercase letters fall back to capitals. Each glyph advances 6 pixels.
+/// Built-in 5x7 pixel font: A-Z, 0-9, a little punctuation (! ? & ' : . , - +), the Spanish letters
+/// Á É Í Ó Ú Ü Ñ ¿ ¡, and the lowercase letters of "going". Other lowercase letters fall back to capitals. Each glyph advances 6 pixels.
 abstract final class PixelFont {
   // 7 rows of 5 cells per glyph, '#' = lit.
   static const Map<String, String> _glyphs = {
@@ -50,6 +50,16 @@ abstract final class PixelFont {
     ',': '.....................##....#...#...',
     '-': '................###................',
     '+': '.......#....#..#####..#....#.......',
+    // Spanish: accented capitals (the accent takes the top row), Ñ, and the opening marks
+    'Á': '..#...###.#...##...#######...##...#',
+    'É': '..#..######....####.#....#....#####',
+    'Í': '..#...###...#....#....#....#...###.',
+    'Ó': '..#...###.#...##...##...##...#.###.',
+    'Ú': '..#..#...##...##...##...##...#.###.',
+    'Ü': '.#.#.#...##...##...##...##...#.###.',
+    'Ñ': '.##.##...###..##.#.##..###...##...#',
+    '¿': '..#.........#...#...#....#...#.###.',
+    '¡': '..#.........#....#....#....#....#..',
     'g': '......#####...##...#.####....#.###.',
     'o': '...........###.#...##...##...#.###.',
     'i': '..#........##....#....#....#...###.',

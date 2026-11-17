@@ -9,6 +9,7 @@ import 'game_state.dart';
 import 'going_up_game.dart';
 import 'music.dart';
 import 'save_store.dart';
+import 'strings.dart';
 import 'sfx.dart';
 
 /// Hosts the Flame game, plays its music and keeps its progress saved on the device.
@@ -26,11 +27,14 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   late final GoingUpGame _game = GoingUpGame(
     state: GameState(onSave: _save, onCrash: HapticFeedback.mediumImpact, onBump: HapticFeedback.lightImpact)
-      ..touchUi = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS
-      ..pauseForMemories = true,
+      ..touchUi = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS,
     music: widget.music ? LayeredMusic() : SilentMusic(),
     sfx: widget.music ? PooledSfx() : SilentSfx(),
-  )..onMuteChanged = _saveMuted;
+  )
+    ..onMuteChanged = _saveMuted
+    ..onLanguageChanged = _saveLanguage
+    // until the save says otherwise, speak the device's language
+    ..lang = WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'es' ? Lang.es : Lang.en;
   late final AppLifecycleListener _lifecycle;
   SaveStore? _store;
   SavedProgress? _unsaved;
@@ -54,6 +58,8 @@ class _GameScreenState extends State<GameScreen> {
       if (!mounted) return;
       _store = store;
       _game.muted = store.muted;
+      final language = store.language;
+      if (language != null) _game.lang = language == 'es' ? Lang.es : Lang.en;
       _game.state.restore(store.read());
       if (_unsaved != null) {
         _unsaved = _game.state.progress; // progress made before loading finished, merged with the save
@@ -78,6 +84,10 @@ class _GameScreenState extends State<GameScreen> {
     if (progress == null || store == null) return;
     _unsaved = null;
     store.write(progress).catchError((Object _) {});
+  }
+
+  void _saveLanguage(Lang lang) {
+    _store?.setLanguage(lang.name).catchError((Object _) {});
   }
 
   void _saveMuted(bool muted) {

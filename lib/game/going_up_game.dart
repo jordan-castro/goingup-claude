@@ -15,6 +15,7 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'components/atmosphere.dart';
 import 'components/bunny.dart';
 import 'components/crash_marker.dart';
+import 'components/flashback.dart';
 import 'components/hollows.dart';
 import 'components/hud.dart';
 import 'components/pickups.dart';
@@ -27,9 +28,11 @@ import 'drawing.dart';
 import 'game_state.dart';
 import 'music.dart';
 import 'palette.dart';
+import 'pixel_font.dart';
 import 'sfx.dart';
 import 'sprites.dart';
 import 'stages.dart';
+import 'strings.dart';
 
 /// The Flame side of goingUP: runs [state] every frame and shows (and plays) it.
 ///
@@ -54,6 +57,29 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
     sfx.muted = value;
   }
 
+  /// The language everything is shown in, and all the words in it.
+  Lang lang = Lang.en;
+  Strings get strings => Strings.of(lang);
+
+  /// Called when the player switches language, so the choice can be saved.
+  void Function(Lang lang)? onLanguageChanged;
+
+  /// The EN / ES button, top-left on the title screen (field units).
+  Rect get languageButton => Rect.fromLTWH(10, 10 + safeTop, 78, 30);
+  bool get showsLanguageButton => state.mode == GameMode.title && !shop.isOpen && !book.isOpen;
+
+  /// The buttons for power-ups bought in the shop, bottom-right during a run: a turbo, and
+  /// above it a triple shield (field units).
+  Rect get turboButton => Rect.fromLTWH(GameState.width - 62, state.height - safeBottom - 64, 52, 52);
+  Rect get tripleShieldButton => turboButton.shift(const Offset(0, -62));
+  bool get showsTurboButton => state.mode == GameMode.playing && state.turbos > 0;
+  bool get showsTripleShieldButton => state.mode == GameMode.playing && state.tripleShields > 0 && state.shieldHits < 3;
+
+  void toggleLanguage() {
+    lang = lang == Lang.en ? Lang.es : Lang.en;
+    onLanguageChanged?.call(lang);
+  }
+
   /// Called when the player mutes or unmutes, so the choice can be saved.
   void Function(bool muted)? onMuteChanged;
 
@@ -76,6 +102,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   late final List<Component> _overlays; // field-space layers in the viewport, over the world
   final ShopScreen shop = ShopScreen();
   final MemoriesScreen book = MemoriesScreen();
+  final FlashbackPlayer flashback = FlashbackPlayer();
   final _rng = math.Random();
   int? _pointer; // the one pointer that steers; extra fingers are ignored
 
@@ -111,7 +138,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   Future<void> onLoad() async {
     _sprites = Sprites();
     state.height = fieldHeightFor(size);
-    _overlays = [Atmosphere(), shop, book, Hud()]; // the HUD's speaker button stays on top
+    _overlays = [Atmosphere(), shop, book, flashback, Hud()]; // the HUD's speaker button stays on top
     camera = CameraComponent(
       world: world,
       viewport: FixedResolutionViewport(resolution: Vector2(GameState.width, state.height)),
@@ -156,7 +183,7 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
     final rate = target < mood ? 1.5 : 4.0; // a new run brightens back over a couple of seconds
     mood += (target - mood) * (1 - math.exp(-rate * math.min(dt, 0.1)));
     deep += (deepTarget - deep) * (1 - math.exp(-(deepTarget < deep ? 2.0 : 4.0) * math.min(dt, 0.1)));
-    music.update(mood, deep, quiet: state.mode == GameMode.dead || state.readingMemory);
+    music.update(mood, deep, quiet: state.mode == GameMode.dead || flashback.isOpen);
     _glitch = math.max(0.0, _glitch - dt);
     final tearing = state.mode == GameMode.playing ? 0.15 * ramp(corruption, 0.7, 1) + 0.45 * deep : 0.0;
     if (_glitch <= 0 && _rng.nextDouble() < tearing * dt) _tear();
@@ -249,7 +276,10 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
   bool get showsMuteButton => state.mode != GameMode.playing;
 
   /// The shop button, bottom-right on the title and game-over screens (field units).
-  Rect get shopButton => Rect.fromLTWH(GameState.width - 102, state.height - safeBottom - 44, 92, 32);
+  Rect get shopButton {
+    final w = 44 + PixelFont.widthOf(strings.shop, 2);
+    return Rect.fromLTWH(GameState.width - 10 - w, state.height - safeBottom - 44, w, 32);
+  }
 
   bool get showsShopButton => !shop.isOpen && !book.isOpen && (state.mode == GameMode.title || state.showGameOver);
 
@@ -285,6 +315,24 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
       shop.press(point);
       return false;
     }
+    if (flashback.isOpen) {
+      flashback.press();
+      return false;
+    }
+    if (showsLanguageButton && languageButton.inflate(4).contains(point)) {
+      toggleLanguage();
+      sfx.play(const SoundCue(Sfx.click));
+      return false;
+    }
+    // the power-up buttons work while flying; pressing one doesn't steer
+    if (showsTurboButton && turboButton.inflate(4).contains(point)) {
+      state.useTurbo();
+      return false;
+    }
+    if (showsTripleShieldButton && tripleShieldButton.inflate(4).contains(point)) {
+      state.useTripleShield();
+      return false;
+    }
     if (book.isOpen) {
       book.press(point);
       return false;
@@ -310,9 +358,11 @@ class GoingUpGame extends FlameGame with DragCallbacks, KeyboardEvents {
       toggleMute();
       return KeyEventResult.handled;
     }
-    if (state.readingMemory &&
-        (event.logicalKey == LogicalKeyboardKey.space || event.logicalKey == LogicalKeyboardKey.enter)) {
-      state.continueMemory();
+    if (flashback.isOpen &&
+        (event.logicalKey == LogicalKeyboardKey.space ||
+            event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.escape)) {
+      flashback.press();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape && (shop.isOpen || book.isOpen)) {

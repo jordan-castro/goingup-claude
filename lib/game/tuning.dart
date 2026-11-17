@@ -14,6 +14,7 @@ class GameTuning {
     this.hollowsCommonAtScreen = 45,
     this.hollowChance = 0.75,
     this.memoryChance = 0.15,
+    this.turboSeconds = 35,
   });
 
   /// A wide-open bonus stretch full of coins starts every this many screens. 0 turns it off.
@@ -55,4 +56,8 @@ class GameTuning {
   /// Chance that a stretch of ordinary tunnel holds the next forgotten memory fragment of the
   /// realm the run is in (at most one per realm per run).
   final double memoryChance;
+
+  /// A turbo from the shop jumps the run ahead to the speed it would have reached this many
+  /// seconds later (35 takes the start from about 190 to about 420 units a second).
+  final double turboSeconds;
 }

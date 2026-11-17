@@ -21,9 +21,9 @@ class MemoryDrift extends Component with HasGameReference<GoingUpGame> {
 
   final math.Random _rng;
   final List<_Keepsake> _photos = [], _scraps = [];
-  final Map<MemoryScene, Picture> _pictures = {};
+  final Map<String, Picture> _pictures = {};
 
-  static const double _photoW = 104, _photoH = 56;
+  static const double _photoW = 84, _photoH = 82;
   static const _glyphs = '#?!&+-:0123456789';
 
   @override
@@ -83,9 +83,10 @@ class MemoryDrift extends Component with HasGameReference<GoingUpGame> {
     }
   }
 
-  Picture _picture(MemoryScene scene) => _pictures.putIfAbsent(scene, () {
+  Picture _picture(Memory memory) => _pictures.putIfAbsent(memory.id, () {
         final recorder = PictureRecorder();
-        drawMemoryScene(Canvas(recorder), const Rect.fromLTWH(0, 0, _photoW, _photoH), scene, 3.5);
+        drawMemoryScene(Canvas(recorder), const Rect.fromLTWH(0, 0, _photoW, _photoH), memory, 7, game.sprites,
+            corruption: 0);
         return recorder.endRecording();
       });
 
@@ -120,7 +121,7 @@ class MemoryDrift extends Component with HasGameReference<GoingUpGame> {
         canvas.save();
         canvas.clipRect(band);
         canvas.translate(image.left + slip, image.top);
-        canvas.drawPicture(_picture(k.memory.scene));
+        canvas.drawPicture(_picture(k.memory));
         canvas.restore();
       }
       // a red ghost copy, slipped out of place (the void)
@@ -131,7 +132,7 @@ class MemoryDrift extends Component with HasGameReference<GoingUpGame> {
           ..colorFilter = const ColorFilter.mode(Color(0xFFFF2030), BlendMode.modulate)
           ..color = Color.fromRGBO(0, 0, 0, 0.35 * c));
         canvas.translate(image.left + 3 + math.sin(t * 9) * 2, image.top);
-        canvas.drawPicture(_picture(k.memory.scene));
+        canvas.drawPicture(_picture(k.memory));
         canvas.restore();
         canvas.restore();
       }

@@ -19,6 +19,15 @@ class Sprites {
   final BunnySprites hollow;
   final Map<String, BunnySprites> _skins = {};
 
+  BunnySprites? _memory, _memoryShade, _memoryHollow;
+
+  /// For the memory scenes, drawn like old sepia photographs: Pip and the family, their
+  /// shadows on a wall, and a Hollow One (whose eye stays red).
+  BunnySprites get memory => _memory ??= BunnySprites._(_sepiaPalette);
+  BunnySprites get memoryShade => _memoryShade ??= BunnySprites._(_shadePalette);
+  BunnySprites get memoryHollow =>
+      _memoryHollow ??= BunnySprites._(_sepiaHollowPalette, rows: _hollowRows, wings: _hollowWingRows);
+
   /// Pip in [skin], marked by the [memories] it has got back (0 for the clean look, as in the
   /// shop): every memory greys the fur a little, and at 4, 8, 12 and 16 a new mark appears.
   BunnySprites skin(BunnySkin skin, {int memories = 0}) {
@@ -86,6 +95,9 @@ class Sprites {
   void dispose() {
     ghost.dispose();
     hollow.dispose();
+    for (final art in [_memory, _memoryShade, _memoryHollow]) {
+      art?.dispose();
+    }
     for (final skin in _skins.values) {
       skin.dispose();
     }
@@ -203,6 +215,43 @@ class Sprites {
     'x': ui.Color(0xFFD0C4B4),
     's': ui.Color(0xFFC0303E),
     'b': ui.Color(0xFF2C2228),
+  };
+
+  static const _sepiaPalette = {
+    'k': ui.Color(0xFF24170E),
+    'w': ui.Color(0xFFC7A878),
+    'g': ui.Color(0xFFB08F62),
+    'p': ui.Color(0xFF9A7048),
+    'c': ui.Color(0xFFA07850),
+    'n': ui.Color(0xFF5A3A22),
+    'm': ui.Color(0xFF3A2618),
+    'b': ui.Color(0xFFD9C49B),
+  };
+
+  static const _shadePalette = {
+    'k': ui.Color(0xFF120B07),
+    'w': ui.Color(0xFF2A1C13),
+    'g': ui.Color(0xFF2A1C13),
+    'p': ui.Color(0xFF2A1C13),
+    'c': ui.Color(0xFF2A1C13),
+    'n': ui.Color(0xFF120B07),
+    'm': ui.Color(0xFF120B07),
+    'b': ui.Color(0xFF3A2A1E),
+  };
+
+  static const _sepiaHollowPalette = {
+    'k': ui.Color(0xFF24170E),
+    'w': ui.Color(0xFF4A3626),
+    'g': ui.Color(0xFF5A4430),
+    'p': ui.Color(0xFF3A2416),
+    'c': ui.Color(0xFF3A2416),
+    'n': ui.Color(0xFF1A0E08),
+    'm': ui.Color(0xFF0C0604),
+    't': ui.Color(0xFFE8D8B4),
+    'r': ui.Color(0xFFC0202C),
+    'x': ui.Color(0xFFD8C49B),
+    's': ui.Color(0xFF8A1C26),
+    'b': ui.Color(0xFF3A2A1E),
   };
 
   // Pip's sprite, gone wrong. Column 8, row 14 is the anchor, like Pip's.

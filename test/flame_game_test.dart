@@ -9,6 +9,7 @@ import 'package:goingup/game/components/pickups.dart';
 import 'package:goingup/game/game_state.dart';
 import 'package:goingup/game/going_up_game.dart';
 import 'package:goingup/game/sfx.dart';
+import 'package:goingup/game/strings.dart';
 
 PickupLayer _pickupLayer(GoingUpGame game) => game.world.children.whereType<PickupLayer>().single;
 
@@ -203,6 +204,29 @@ void main() {
       }
       expect(game.book.page, GameState.realms.length - 1);
 
+      // tapping a memory that was found plays it as a flashback
+      await game.ready();
+      game.book.page = 0;
+      game.press(at(game.book.entries[0].center), touch: true);
+      expect(game.flashback.isOpen, isTrue);
+      expect(state.watched, contains('sky-0'));
+      game.update(0.3);
+      game.press(at(game.book.entries[0].center), touch: true);
+      expect(game.flashback.typed, isFalse, reason: 'taps while the ink spreads are ignored');
+      game.update(1);
+      game.press(Vector2(10, 300), touch: true);
+      expect(game.flashback.typed, isTrue, reason: 'the first tap finishes the words');
+      game.press(Vector2(10, 300), touch: true);
+      expect(game.flashback.burning, isTrue, reason: 'the next sets the page alight');
+      for (var i = 0; i < 100; i++) {
+        game.update(1 / 60);
+      }
+      expect(game.flashback.isOpen, isFalse, reason: 'it burns away, back to the book');
+      expect(game.book.isOpen, isTrue);
+      // a forgotten one can't be played
+      game.press(at(game.book.entries[3].center), touch: true);
+      expect(game.flashback.isOpen, isFalse);
+
       game.press(at(game.book.backButton.center), touch: true);
       expect(game.book.isOpen, isFalse);
       expect(game.press(Vector2(GameState.width / 2, state.height * 0.4), touch: true), isTrue);
@@ -262,6 +286,86 @@ void main() {
         game.render(Canvas(recorder));
         recorder.endRecording().dispose();
       }
+    },
+  );
+
+  testWithGame<GoingUpGame>(
+    'every memory plays as a flashback and draws without trouble',
+    GoingUpGame.new,
+    (game) async {
+      game.onGameResize(Vector2(390, 844));
+      await game.ready();
+      for (final memory in Memories.all) {
+        game.state.restore(SavedProgress(memories: [memory.id]));
+        game.flashback.play(memory, const Offset(200, 400));
+        for (final step in const [0.3, 1.0, 3.0, 6.0]) {
+          game.update(step);
+          final recorder = PictureRecorder();
+          game.render(Canvas(recorder));
+          recorder.endRecording().dispose();
+        }
+        game.flashback.press();
+        game.flashback.press();
+        game.update(0.7);
+        final recorder = PictureRecorder();
+        game.render(Canvas(recorder));
+        recorder.endRecording().dispose();
+        game.update(1);
+        expect(game.flashback.isOpen, isFalse, reason: memory.id);
+      }
+    },
+  );
+
+  testWithGame<GoingUpGame>(
+    'the EN / ES button switches the language, and the power-up buttons work mid-flight without steering',
+    () => GoingUpGame(state: GameState(seed: 5)),
+    (game) async {
+      await game.ready();
+      final langs = <Lang>[];
+      game.onLanguageChanged = langs.add;
+      final state = game.state..restore(const SavedProgress(turbos: 1, tripleShields: 1));
+      Vector2 at(Offset p) => Vector2(p.dx, p.dy);
+      expect(game.showsLanguageButton, isTrue);
+      expect(game.press(at(game.languageButton.center), touch: true), isFalse);
+      expect((game.lang, game.strings.shop), (Lang.es, 'TIENDA'));
+      expect(langs, [Lang.es], reason: 'the choice is reported, to be saved');
+      expect(state.mode, GameMode.title, reason: 'switching language does not start a run');
+
+      game.press(Vector2(GameState.width / 2, state.height * 0.5), touch: true);
+      expect(game.showsLanguageButton, isFalse);
+      expect(game.showsTurboButton && game.showsTripleShieldButton, isTrue);
+      final shieldAt = game.tripleShieldButton.center;
+      expect(game.press(at(game.turboButton.center), touch: true), isFalse, reason: 'it does not steer');
+      expect(state.turbos, 0);
+      expect(game.showsTurboButton, isFalse, reason: 'none left');
+      expect(game.press(at(shieldAt), touch: true), isFalse);
+      expect(state.shieldHits, 3);
+      final recorder = PictureRecorder();
+      game.update(1 / 60);
+      game.render(Canvas(recorder));
+      recorder.endRecording().dispose();
+    },
+  );
+
+  testWithGame<GoingUpGame>(
+    'the shop sells power-ups on their own shelf, again and again',
+    () => GoingUpGame(state: GameState(seed: 6)),
+    (game) async {
+      await game.ready();
+      final state = game.state..restore(const SavedProgress(coins: 60));
+      Vector2 at(Offset p) => Vector2(p.dx, p.dy);
+      game.press(at(game.shopButton.center), touch: true);
+      game.press(at(game.shop.tab(Shelf.powers).center), touch: true);
+      expect(game.shop.selected, isA<PowerUpItem>());
+      game.press(at(game.shop.card(0).center), touch: true); // turbo
+      game.press(at(game.shop.actionButton.center), touch: true);
+      game.press(at(game.shop.actionButton.center), touch: true);
+      expect((state.turbos, state.coins), (2, 10));
+      game.press(at(game.shop.actionButton.center), touch: true);
+      expect(state.turbos, 2, reason: 'not enough coins left');
+      final recorder = PictureRecorder();
+      game.render(Canvas(recorder));
+      recorder.endRecording().dispose();
     },
   );
 

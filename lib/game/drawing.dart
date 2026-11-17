@@ -58,6 +58,21 @@ void drawPowerUp(Canvas canvas, Offset c, PowerUp p, double r) {
   canvas.restore();
 }
 
+/// A lightning bolt [size] tall: the turbo's mark.
+void drawBolt(Canvas canvas, Offset c, double size, Color color) {
+  final k = size / 28;
+  canvas.drawPath(
+      Path()
+        ..moveTo(c.dx + 4 * k, c.dy - 14 * k)
+        ..lineTo(c.dx - 8 * k, c.dy + 2 * k)
+        ..lineTo(c.dx - 1 * k, c.dy + 2 * k)
+        ..lineTo(c.dx - 4 * k, c.dy + 14 * k)
+        ..lineTo(c.dx + 8 * k, c.dy - 2 * k)
+        ..lineTo(c.dx + 1 * k, c.dy - 2 * k)
+        ..close(),
+      Paint()..color = color);
+}
+
 /// Dark rounded panel with a light edge, behind HUD text.
 void drawPanel(Canvas canvas, Rect rect, {Color edge = Palette.panelEdge}) {
   final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
@@ -93,8 +108,58 @@ double ramp(double x, double from, double to) {
   return t * t * (3 - 2 * t);
 }
 
+/// Steady pseudo-random number in [0, 1) for a point.
+double hash2(double x, double y) {
+  final v = math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return v - v.floorToDouble();
+}
+
+/// Smooth value noise in [0, 1): neighbouring points get similar values.
+double noise2(double x, double y) {
+  final xi = x.floorToDouble(), yi = y.floorToDouble(), xf = x - xi, yf = y - yi;
+  final u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  final a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+/// [noise2] with finer detail layered on: ragged, natural-looking edges for ink and fire.
+double fbm2(double x, double y) => noise2(x, y) * 0.55 + noise2(x * 2.1, y * 2.1) * 0.3 + noise2(x * 4.3, y * 4.3) * 0.15;
+
+/// A closed blob around [centre] about [radius] across, its edge made ragged by noise that
+/// shifts with [time]; [rough] sets how ragged.
+Path noisyBlob(Offset centre, double radius, double time, {double rough = 0.32, double seed = 5, double squash = 1}) {
+  final path = Path();
+  const points = 96;
+  for (var i = 0; i <= points; i++) {
+    final a = i / points * 2 * math.pi;
+    final r = radius * (1 + rough * (fbm2(math.cos(a) * 1.6 + seed, math.sin(a) * 1.6 + time * 0.7) - 0.5));
+    final p = centre + Offset(math.cos(a) * r, math.sin(a) * r * squash);
+    i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+  }
+  return path..close();
+}
+
 /// Blinks on for most of each 1.1 s cycle.
 bool blinkOn(double time) => time % 1.1 < 0.75;
+
+/// [rect] with all four edges torn ragged (steady for a given [seed]).
+Path tornRect(Rect rect, int seed, {double tooth = 10, double depth = 7}) {
+  final p = Path()..moveTo(rect.left, rect.top + hash01(seed) * depth);
+  var i = 0;
+  for (var x = rect.left; x < rect.right; x += tooth) {
+    p.lineTo(math.min(x + tooth, rect.right), rect.top + hash01(seed * 31 + ++i) * depth);
+  }
+  for (var y = rect.top; y < rect.bottom; y += tooth) {
+    p.lineTo(rect.right - hash01(seed * 37 + ++i) * depth, math.min(y + tooth, rect.bottom));
+  }
+  for (var x = rect.right; x > rect.left; x -= tooth) {
+    p.lineTo(math.max(x - tooth, rect.left), rect.bottom - hash01(seed * 41 + ++i) * depth);
+  }
+  for (var y = rect.bottom; y > rect.top; y -= tooth) {
+    p.lineTo(rect.left + hash01(seed * 43 + ++i) * depth, math.max(y - tooth, rect.top));
+  }
+  return p..close();
+}
 
 /// A torn strip of parchment filling [rect], with ragged top and bottom edges (steady for a
 /// given [seed]) and a few ink blots. [alpha] fades the whole strip.

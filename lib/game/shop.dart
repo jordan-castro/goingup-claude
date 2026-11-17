@@ -2,8 +2,11 @@ import 'dart:ui';
 
 import 'palette.dart';
 
-/// The two shelves of the coin shop.
-enum Shelf { bunnies, trails }
+/// The shelves of the coin shop.
+enum Shelf { bunnies, trails, powers }
+
+/// Power-ups from the shop, used during a run from their buttons.
+enum Boost { turbo, tripleShield }
 
 /// Something the coin shop sells. The first item on each shelf is free and owned from the start.
 sealed class ShopItem {
@@ -52,6 +55,17 @@ class TrailStyle extends ShopItem {
 
   @override
   Shelf get shelf => Shelf.trails;
+}
+
+/// A power-up to buy as many times as you like and use during a run: a turbo, or a triple
+/// shield that takes three hits.
+class PowerUpItem extends ShopItem {
+  const PowerUpItem(super.id, super.name, super.price, this.boost);
+
+  final Boost boost;
+
+  @override
+  Shelf get shelf => Shelf.powers;
 }
 
 /// Everything for sale, cheapest first on each shelf.
@@ -153,12 +167,18 @@ abstract final class Shop {
     ]),
   ];
 
+  static const powers = <PowerUpItem>[
+    PowerUpItem('turbo', 'TURBO', 25, Boost.turbo),
+    PowerUpItem('triple-shield', 'SHIELD X3', 60, Boost.tripleShield),
+  ];
+
   static BunnySkin get defaultSkin => skins.first;
   static TrailStyle get defaultTrail => trails.first;
 
   static List<ShopItem> shelf(Shelf shelf) => switch (shelf) {
         Shelf.bunnies => skins,
         Shelf.trails => trails,
+        Shelf.powers => powers,
       };
 
   /// The skin or trail with [id], or the free one if there's no such item (any more).
