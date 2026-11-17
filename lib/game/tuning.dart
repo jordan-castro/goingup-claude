@@ -18,6 +18,7 @@ class GameTuning {
     this.hollowChance = 0.9,
     this.hollowNestEveryMeters = 40,
     this.milestoneEveryMeters = 100,
+    this.turboSeconds = 35,
   });
 
   /// A wide-open bonus stretch full of coins starts every this many meters, the first one half
@@ -65,4 +66,8 @@ class GameTuning {
 
   /// "100 METERS!" every this many meters.
   final int milestoneEveryMeters;
+
+  /// A turbo from the shop jumps the run ahead to the speed it would have reached this many
+  /// seconds later (35 takes the start from about 190 to about 420 units a second).
+  final double turboSeconds;
 }

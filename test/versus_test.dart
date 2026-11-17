@@ -51,7 +51,7 @@ class _Pair {
 GameState _wearing(String skin, int seed) {
   final state = GameState(seed: seed);
   if (skin != Shop.defaultSkin.id) state.restore(SavedProgress(owned: [skin], skin: skin));
-  return state..pauseForMemories = true;
+  return state;
 }
 
 void _autopilot(GameState game) {
@@ -175,15 +175,14 @@ void main() {
     expect(p.guest.friendLeft, isTrue);
   });
 
-  test('in a race memories go straight into the book instead of pausing the run', () async {
+  test('in a race memories go straight into the book, as always', () async {
     final p = _Pair();
     await p.startRace();
     final state = p.hostState;
     state.pickups.add(Pickup.memory(state.bunnyX, state.worldY(state.bunnyY), Memories.arrivalOf(0), 0));
     await p.frame();
     expect(state.memories, contains('sky-0'));
-    expect(state.readingMemory, isFalse);
-    expect(state.toast, 'A MEMORY. READ IT IN THE BOOK.');
+    expect(state.toast, Toast.memory);
     expect(state.marker, isNull, reason: 'no last-crash ghost in a race');
   });
 

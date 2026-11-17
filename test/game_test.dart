@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goingup/game/game_state.dart';
 import 'package:goingup/game/pixel_font.dart';
+import 'package:goingup/game/strings.dart';
 
 /// Flies with the autopilot (passing through walls and hollows) until [done] or 2 minutes.
 void _flyUntil(GameState game, bool Function() done) {
@@ -315,7 +316,7 @@ void main() {
       game.grace = 1; // fly straight through everything: this test only looks at the layout
       _autopilot(game);
       game.update(_frame);
-      warned = warned || game.toast == 'THEY FOUND YOU.';
+      warned = warned || (game.toastTime > 0 && game.toast == Toast.theyFoundYou);
       for (final g in game.hollows) {
         if (seen.add(g)) firstMeters ??= game.meters;
         final sy = game.screenY(g.wy);
@@ -511,7 +512,7 @@ void main() {
     var forgiven = false;
     for (var i = 0; i < 60 * 10 && game.mode == GameMode.playing; i++) {
       game.update(_frame);
-      forgiven = forgiven || (game.toast == 'SECOND CHANCE!' && game.toastTime > 0);
+      forgiven = forgiven || (game.toast == Toast.secondChance && game.toastTime > 0);
     }
     expect(forgiven, isTrue);
     expect(game.mode, GameMode.dead, reason: 'the second crash is not');
@@ -522,11 +523,10 @@ void main() {
   test('nothing is remembered on its own: no memory at take-off or on entering a realm', () {
     final game = GameState(seed: 14, tuning: const GameTuning(realmEveryMeters: 10, hollowChance: 0));
     game.pointerDown(GameState.width / 2, game.height * 0.72);
-    expect(game.shownMemory, isNull);
     _flyUntil(game, () => game.realm >= 1);
     expect(game.realm, 1);
     expect(game.memories, isEmpty);
-    expect(game.shownMemory, isNull);
+    expect(game.newMemories, isFalse);
   });
 
   test("each realm's memory and its next fragment wait side by side: take one and the other is lost", () {
@@ -556,10 +556,16 @@ void main() {
       ..wy = game.worldY(game.bunnyY);
     game.update(_frame);
     expect(game.memories, {'sky-1'});
-    expect(game.shownMemory?.id, 'sky-1');
+    expect(game.toast, Toast.memory, reason: 'a word on screen; it is watched later in the book');
     expect(game.newMemories, isTrue);
     expect(game.pickups.where((p) => p.memory != null), isEmpty, reason: 'the memory was given up');
     expect(saves.last.memories, ['sky-1']);
+    final distance = game.distance;
+    for (var i = 0; i < 30; i++) {
+      game.grace = 1;
+      game.update(_frame);
+    }
+    expect(game.distance, greaterThan(distance + 10), reason: 'the run never pauses for a memory');
 
     // the next run offers the memory again, with the next fragment
     final again = GameState(seed: 15, tuning: const GameTuning(hollowChance: 0))
@@ -591,60 +597,15 @@ void main() {
     expect(only.x, GameState.width / 2);
   });
 
-  test('in the app a memory pauses the run until the player has read it and continues', () {
-    final game = GameState(seed: 16, tuning: const GameTuning(bonusZoneEveryMeters: 0, hollowChance: 0))
-      ..pauseForMemories = true;
-    game.pointerDown(GameState.width / 2, game.height * 0.72);
-    expect(game.readingMemory, isFalse, reason: 'the run starts straight away');
-    game.update(_frame);
-    game.pickups.add(Pickup.memory(game.bunnyX, game.worldY(game.bunnyY), Memories.arrivalOf(0), 0));
-    game.update(_frame);
-    expect(game.readingMemory, isTrue);
-    expect(game.holding, isFalse, reason: 'the bunny waits where it is');
-
-    final distance = game.distance;
-    for (var i = 0; i < 20; i++) {
-      game.update(_frame);
-    }
-    game.pointerDown(GameState.width / 2, game.height * 0.72);
-    expect(game.readingMemory, isTrue, reason: 'a press in the first moment is ignored');
-    for (var i = 0; i < 60; i++) {
-      game.update(_frame);
-    }
-    expect(game.distance, distance, reason: 'nothing moves while the memory is shown');
-    expect(game.memoryTyped, isFalse);
-
-    game.pointerDown(GameState.width / 2, game.height * 0.72);
-    expect(game.memoryTyped, isTrue, reason: 'the first press finishes the words');
-    expect(game.readingMemory, isTrue);
-    game.pointerDown(GameState.width / 2, game.height * 0.72);
-    expect(game.readingMemory, isTrue, reason: 'the ink draws back into the bunny first');
-    for (var i = 0; i < 40; i++) {
-      game.update(_frame);
-    }
-    expect(game.readingMemory, isFalse, reason: 'then the run goes on');
-    expect(game.holding, isFalse, reason: 'that press does not steer; the next hold will');
-    expect(game.grace, greaterThan(1), reason: 'a moment to get going again');
-
-    for (var i = 0; i < 60; i++) {
-      game.update(_frame);
-    }
-    expect(game.distance, greaterThan(distance));
-    expect(game.mode, GameMode.playing);
-  });
-
-  test('memories that come back together wait their turn', () {
-    final game = GameState(seed: 17);
-    game.pointerDown(GameState.width / 2, game.height * 0.72);
-    game.update(_frame);
-    for (final m in [Memories.arrivalOf(0), Memories.fragmentsOf(0).first]) {
-      game.pickups.add(Pickup.memory(game.bunnyX, game.worldY(game.bunnyY), m, 0));
-    }
-    game.update(_frame);
-    expect(game.memories, {'sky-0', 'sky-1'}, reason: 'remembered (and saved) straight away');
-    expect(game.shownMemory?.id, 'sky-0', reason: 'but shown one after the other');
-    _flyUntil(game, () => game.shownMemory?.id != 'sky-0');
-    expect(game.shownMemory?.id, 'sky-1');
+  test('memories watched in the book are remembered, and only ones that were found', () {
+    final saves = <SavedProgress>[];
+    final game = GameState(onSave: saves.add)
+      ..restore(const SavedProgress(memories: ['sky-0', 'sky-1'], watched: ['sky-0', 'sky-2']));
+    expect(game.watched, {'sky-0'}, reason: 'sky-2 was never found');
+    game.markWatched(Memories.all.firstWhere((m) => m.id == 'sky-1'));
+    expect(saves.last.watched, ['sky-0', 'sky-1']);
+    game.markWatched(Memories.all.firstWhere((m) => m.id == 'void-3'));
+    expect(game.watched, isNot(contains('void-3')), reason: 'a memory has to be found before it can be watched');
   });
 
   test('the story fits: every realm has its memory and three fragments, in letters the font has', () {
@@ -664,8 +625,132 @@ void main() {
     }
   });
 
+  test('on a touch screen the bunny flies well above the finger, with a mouse right at the cursor', () {
+    double settledY({required bool touch}) {
+      final game = GameState(seed: 40, tuning: const GameTuning(hollowChance: 0, powerUpChance: 0));
+      game.pointerDown(GameState.width / 2, game.height * 0.8, touch: touch);
+      for (var i = 0; i < 60; i++) {
+        game.grace = 1;
+        game.update(_frame);
+      }
+      return game.bunnyY;
+    }
+
+    final mouse = settledY(touch: false), finger = settledY(touch: true);
+    expect(finger, closeTo(mouse - GameState.touchLift, 2));
+  });
+
+  test('a turbo from the shop makes the run much faster, when the player wants it', () {
+    final saves = <SavedProgress>[];
+    final game = GameState(seed: 31, onSave: saves.add, tuning: const GameTuning(bonusZoneEveryMeters: 0))
+      ..restore(const SavedProgress(coins: 100));
+    final turbo = Shop.powers.firstWhere((p) => p.boost == Boost.turbo);
+    expect(game.buy(turbo), isTrue);
+    expect(game.buy(turbo), isTrue, reason: 'power-ups can be bought again and again');
+    expect((game.turbos, game.coins), (2, 100 - 2 * turbo.price));
+    expect(saves.last.turbos, 2);
+    expect(game.useTurbo(), isFalse, reason: 'only during a run');
+
+    game.pointerDown(GameState.width / 2, game.height * 0.72);
+    for (var i = 0; i < 60; i++) {
+      _autopilot(game);
+      game.update(_frame);
+    }
+    final before = game.speed;
+    expect(game.useTurbo(), isTrue);
+    game.update(_frame);
+    expect(game.speed, greaterThan(before * 2), reason: 'about 190 a second becomes about 420');
+    expect(game.turbos, 1);
+    expect(game.toast, Toast.turbo);
+  });
+
+  test('a triple shield takes three hits, then breaks', () {
+    final game = GameState(seed: 32, tuning: const GameTuning(powerUpChance: 0, bonusZoneEveryMeters: 0, hollowChance: 0))
+      ..restore(const SavedProgress(tripleShields: 1));
+    game.pointerDown(GameState.width / 2, game.height * 0.72);
+    for (var i = 0; i < 90; i++) {
+      game.update(_frame);
+    }
+    expect(game.useTripleShield(), isTrue);
+    expect((game.shieldHits, game.tripleShields), (3, 0));
+    expect(game.useTripleShield(), isFalse, reason: 'none left');
+
+    final hitsLeft = <int>[];
+    for (var hit = 0; hit < 3; hit++) {
+      game.hollows.add(Hollow(game.worldY(game.bunnyY), game.bunnyX, 0, 0, 0));
+      game.update(_frame);
+      hitsLeft.add(game.shieldHits);
+      for (var i = 0; i < 100; i++) {
+        _autopilot(game);
+        game.update(_frame); // past the moment of grace
+      }
+    }
+    expect(hitsLeft, [2, 1, 0]);
+    expect(game.mode, GameMode.playing, reason: 'three hits taken, still flying');
+    expect(game.toast, Toast.shieldBroken);
+
+    game.hollows.add(Hollow(game.worldY(game.bunnyY), game.bunnyX, 0, 0, 0));
+    game.update(_frame);
+    expect(game.mode, GameMode.dead, reason: 'the fourth hit gets through');
+
+    // a shield picked up in the tunnel doesn't weaken a triple shield
+    final again = GameState()..shieldHits = 3;
+    again.applyPowerUp(PowerUp.shield);
+    expect(again.shieldHits, 3);
+  });
+
+  test('every word shows in both languages, in letters the font has, and the memories fit', () {
+    for (final lang in Lang.values) {
+      final words = Strings.of(lang);
+      final all = [
+        words.meters, words.best, words.holdToSteer, words.entering, words.lastCrash,
+        for (final t in Toast.values) words.toast(t, 30),
+        ...words.howToPlay(touch: true), ...words.howToPlay(touch: false), words.dontTouchTheWalls,
+        words.start(touch: true), words.start(touch: false), words.bonk, words.gotYou, words.youFlew,
+        words.newBest, words.retry, words.inRealm(4), words.coins(1), words.coins(2), words.shop, words.memories,
+        for (var r = 0; r < GameState.realms.length; r++) words.realmName(r),
+        for (final s in Shelf.values) ...[words.shelf(s), words.kind(s)],
+        words.yay, words.wearing, words.owned, words.wearIt, words.buy, words.needMore(5), words.have(2), words.back,
+        for (final item in [...Shop.skins, ...Shop.trails, ...Shop.powers]) words.itemName(item),
+        for (final b in Boost.values) ...words.powerUpHelp(b),
+        words.memoriesCount(3, 20), words.isNew, words.reachToRemember, words.forgotten, words.tapToSee,
+        words.remembered, words.toContinue(touch: true), words.toContinue(touch: false),
+        for (final perk in Perk.values) words.perk(perk),
+        words.twoPlayers, words.getReady, words.wins(2, 1), words.lastOneFlyingWins, words.friend, words.you,
+        words.go, words.youWin, words.youLose, words.draw, words.friendLeft, words.waitingForFriend,
+        words.friendCrashed, words.bothCrashed, words.friendKeptFlying, words.rematch, words.friendWantsRematch,
+        words.leave, words.hostAGame, words.joinAGame, words.typeAnAddress, words.join, words.cancel,
+        words.startRace, words.ok, words.hosting, words.waitingForAFriend, words.lookingForGames, words.joining,
+        words.sayingHello, words.gameOf('GUARDIÁN'), ...words.versusHow, ...words.howToJoin, ...words.howToHost,
+        ...words.cantListen, ...words.waitingForHost, ...words.couldNotHost, words.couldNotJoin, words.yourFriendLeft,
+      ];
+      for (final perk in Perk.values) {
+        expect(PixelFont.widthOf(words.perk(perk), 2), lessThan(330), reason: '${words.perk(perk)} fits the shop');
+      }
+      for (final line in [...words.versusHow, ...words.howToJoin, ...words.cantListen, ...words.waitingForHost]) {
+        expect(PixelFont.widthOf(line, 2), lessThan(GameState.width - 16), reason: '$line fits the screen');
+      }
+      for (final text in all) {
+        for (final ch in text.split('')) {
+          expect(ch == ' ' || PixelFont.glyph(ch) != null, isTrue, reason: '"$ch" in "$text" ($lang)');
+        }
+      }
+      for (final line in words.howToPlay(touch: true) + words.howToPlay(touch: false)) {
+        expect(PixelFont.widthOf(line, 2), lessThan(GameState.width - 80), reason: '$line fits the title panel');
+      }
+      for (final m in Memories.all) {
+        final text = words.memory(m);
+        for (final ch in text.split('')) {
+          expect(ch == ' ' || PixelFont.glyph(ch) != null, isTrue, reason: '"$ch" in ${m.id} ($lang)');
+        }
+        expect(PixelFont.wrap(text, 25).length, lessThanOrEqualTo(4), reason: '${m.id} ($lang) fits the page');
+      }
+    }
+    expect(Strings.spanish.memory(Memories.all.last), contains('PIP'), reason: 'Pip keeps its name');
+  });
+
   test('every font glyph is 5x7 and the title letters exist', () {
-    for (final ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?&':.,-+%/going".split('')) {
+    for (final ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?&':.,-+goínGÁÉÍÓÚÜÑ¿¡%/".split('')) {
       expect(PixelFont.glyph(ch)?.length, 35, reason: 'glyph "$ch"');
     }
   });

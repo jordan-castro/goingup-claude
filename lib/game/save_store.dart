@@ -19,6 +19,14 @@ class SaveStore {
   static const _skinKey = 'skin';
   static const _trailKey = 'trail';
   static const _memoriesKey = 'memories';
+  static const _watchedKey = 'watched';
+  static const _turbosKey = 'turbos';
+  static const _tripleShieldsKey = 'tripleShields';
+  static const _languageKey = 'language';
+
+  /// The language chosen with the EN / ES button ('en' or 'es'), or null if never chosen.
+  String? get language => _prefs.getString(_languageKey);
+  Future<void> setLanguage(String value) => _prefs.setString(_languageKey, value);
 
   /// Older versions counted screens flown, 720 units each.
   static const _oldBestKey = 'best', _oldLastKey = 'lastScreens';
@@ -39,6 +47,9 @@ class SaveStore {
         skin: _prefs.getString(_skinKey),
         trail: _prefs.getString(_trailKey),
         memories: _prefs.getStringList(_memoriesKey) ?? const [],
+        watched: _prefs.getStringList(_watchedKey) ?? const [],
+        turbos: _prefs.getInt(_turbosKey) ?? 0,
+        tripleShields: _prefs.getInt(_tripleShieldsKey) ?? 0,
       );
 
   int? _fromScreens(String key) {
@@ -61,5 +72,8 @@ class SaveStore {
     if (skin != null) await _prefs.setString(_skinKey, skin);
     if (trail != null) await _prefs.setString(_trailKey, trail);
     await _prefs.setStringList(_memoriesKey, progress.memories);
+    await _prefs.setStringList(_watchedKey, progress.watched);
+    await _prefs.setInt(_turbosKey, progress.turbos);
+    await _prefs.setInt(_tripleShieldsKey, progress.tripleShields);
   }
 }

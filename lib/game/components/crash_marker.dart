@@ -33,7 +33,7 @@ class CrashMarkerView extends Component with HasGameReference<GoingUpGame> {
       canvas.drawLine(Offset(x, y), Offset(x + 8, y), dash);
     }
 
-    const label = 'LAST CRASH';
+    final label = game.strings.lastCrash;
     final w = PixelFont.widthOf(label, 2) + 14;
     final lx = m.x > GameState.width / 2 ? 12.0 : GameState.width - 12 - w;
     final ly = y - 34;

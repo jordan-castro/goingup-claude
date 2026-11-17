@@ -11,6 +11,7 @@ import '../going_up_game.dart';
 import '../palette.dart';
 import '../pixel_font.dart';
 import '../sprites.dart';
+import '../strings.dart';
 import '../versus/lan.dart';
 import '../versus/match.dart';
 
@@ -54,7 +55,7 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
   bool _cantListen = false;
   String typed = '';
   String _joining = '';
-  List<String> _message = const [];
+  List<String> Function(Strings words) _message = (_) => const []; // in the player's language
 
   LanHost? _host;
   StreamSubscription<LanLink>? _joins;
@@ -114,7 +115,7 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
       final list = await host.addresses();
       if (attempt == _attempt) addresses = list;
     } catch (_) {
-      if (attempt == _attempt) _say(const ['COULD NOT HOST A GAME.', 'IS THE WI-FI ON?']);
+      if (attempt == _attempt) _say((w) => w.couldNotHost);
     }
   }
 
@@ -138,7 +139,7 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
       }
       _startMatch(link, hosting: false);
     } catch (_) {
-      if (attempt == _attempt) _say(['COULD NOT JOIN', address]);
+      if (attempt == _attempt) _say((w) => [w.couldNotJoin, address]);
     }
   }
 
@@ -147,7 +148,7 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
     page = VersusPage.lobby;
   }
 
-  void _say(List<String> lines) {
+  void _say(List<String> Function(Strings words) lines) {
     _stop();
     _message = lines;
     page = VersusPage.message;
@@ -218,7 +219,7 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
       if (match.friendLeft) {
         game.state.toTitle();
         isOpen = true;
-        _say(const ['YOUR FRIEND LEFT.']);
+        _say((w) => [w.yourFriendLeft]);
       }
     } else if (isOpen && page == VersusPage.lobby) {
       if (match == null) {
@@ -253,34 +254,35 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
   /// network, which draws itself), and what they do.
   List<VersusButton> get buttons {
     final match = game.match;
+    final words = game.strings;
     return switch (page) {
       VersusPage.menu => [
-          VersusButton(_wide(236), 'HOST A GAME', host, primary: true),
-          VersusButton(_wide(300), 'JOIN A GAME', find, primary: true),
-          VersusButton(_backButton, 'BACK', back),
+          VersusButton(_wide(236), words.hostAGame, host, primary: true),
+          VersusButton(_wide(300), words.joinAGame, find, primary: true),
+          VersusButton(_backButton, words.back, back),
         ],
-      VersusPage.hosting => [VersusButton(_backButton, 'CANCEL', back)],
+      VersusPage.hosting => [VersusButton(_backButton, words.cancel, back)],
       VersusPage.finding => [
           for (final (i, g) in found.indexed)
             VersusButton(_wide(64 + i * 62.0, 54), '', () => join(g.address, port: g.port), game: g),
-          VersusButton(_wide(330, 46), 'TYPE AN ADDRESS', () {
+          VersusButton(_wide(330, 46), words.typeAnAddress, () {
             _stop();
             page = VersusPage.typing;
           }),
-          VersusButton(_backButton, 'BACK', back),
+          VersusButton(_backButton, words.back, back),
         ],
       VersusPage.typing => [
           for (final (i, k) in _keys.indexed) VersusButton(_key(i), k, () => _typeKey(k)),
-          VersusButton(_wide(360, 50), 'JOIN', _joinTyped, primary: _addressLooksRight),
-          VersusButton(_backButton, 'BACK', back),
+          VersusButton(_wide(360, 50), words.join, _joinTyped, primary: _addressLooksRight),
+          VersusButton(_backButton, words.back, back),
         ],
-      VersusPage.connecting => [VersusButton(_backButton, 'CANCEL', back)],
+      VersusPage.connecting => [VersusButton(_backButton, words.cancel, back)],
       VersusPage.lobby => [
           if (match != null && match.hosting && match.friendHere && !match.ready)
-            VersusButton(_wide(320), 'START', match.setReady, primary: true),
-          VersusButton(_backButton, 'LEAVE', back),
+            VersusButton(_wide(320), words.startRace, match.setReady, primary: true),
+          VersusButton(_backButton, words.leave, back),
         ],
-      VersusPage.message => [VersusButton(_wide(300), 'OK', back, primary: true)],
+      VersusPage.message => [VersusButton(_wide(300), words.ok, back, primary: true)],
     };
   }
 
@@ -305,11 +307,12 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
     final state = game.state;
     canvas.drawRect(Rect.fromLTWH(0, 0, _w, state.height), Paint()..color = Palette.page.withValues(alpha: 0.92));
     final top = _top;
+    final words = game.strings;
     final heading = switch (page) {
-      VersusPage.hosting => 'HOSTING',
-      VersusPage.finding || VersusPage.connecting => 'JOIN A GAME',
-      VersusPage.typing => 'TYPE AN ADDRESS',
-      _ => '2 PLAYERS',
+      VersusPage.hosting => words.hosting,
+      VersusPage.finding || VersusPage.connecting => words.joinAGame,
+      VersusPage.typing => words.typeAnAddress,
+      _ => words.twoPlayers,
     };
     PixelFont.drawCentered(canvas, heading, _w / 2, top + 2, heading.length > 12 ? 3 : 5, Palette.text,
         shadow: Palette.hot);
@@ -317,18 +320,11 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
     switch (page) {
       case VersusPage.menu:
         drawPanel(canvas, _wide(56, 140));
-        _lines(canvas, const [
-          'FLY THE SAME TUNNEL AS A',
-          'FRIEND ON THE SAME WI-FI.',
-          "YOU CAN'T BUMP INTO EACH",
-          "OTHER: THEY'RE A GHOST.",
-          'THE LAST ONE FLYING WINS!',
-        ], top + 72, last: Palette.sun);
+        _lines(canvas, words.versusHow, top + 72, last: Palette.sun);
       case VersusPage.hosting:
-        PixelFont.drawCentered(canvas, 'WAITING FOR A FRIEND${_dots()}', _w / 2, top + 64, 2, Palette.sun);
+        PixelFont.drawCentered(canvas, '${words.waitingForAFriend}${_dots()}', _w / 2, top + 64, 2, Palette.sun);
         drawPanel(canvas, _wide(96, 104));
-        _lines(canvas, const ['ON THE SAME WI-FI, THEY', 'PRESS 2 PLAYERS, THEN', 'JOIN A GAME. OR THEY CAN', 'TYPE IN:'],
-            top + 108);
+        _lines(canvas, words.howToJoin, top + 108);
         var y = top + 220;
         for (final address in addresses.take(4)) {
           PixelFont.drawCentered(canvas, address, _w / 2, y, 3, Palette.text, shadow: Palette.ink);
@@ -337,22 +333,22 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
         if (addresses.isEmpty) PixelFont.drawCentered(canvas, '...', _w / 2, y, 3, Palette.muted);
       case VersusPage.finding:
         if (found.isEmpty) {
-          PixelFont.drawCentered(canvas, 'LOOKING FOR GAMES${_dots()}', _w / 2, top + 90, 2, Palette.sun);
-          _lines(canvas, const ['THE HOST PRESSES', 'HOST A GAME ON THE', 'SAME WI-FI.'], top + 130);
+          PixelFont.drawCentered(canvas, '${words.lookingForGames}${_dots()}', _w / 2, top + 90, 2, Palette.sun);
+          _lines(canvas, words.howToHost, top + 130);
         }
-        if (_cantListen) _lines(canvas, const ["CAN'T LISTEN FOR GAMES HERE:", 'TYPE THE ADDRESS INSTEAD.'], top + 250);
+        if (_cantListen) _lines(canvas, words.cantListen, top + 250);
       case VersusPage.typing:
         final field = _wide(56, 52);
         drawPanel(canvas, field, edge: Palette.sun);
         final cursor = blinkOn(_time) ? '-' : ' ';
         PixelFont.drawCentered(canvas, '$typed$cursor', _w / 2, field.top + 15, 3, Palette.text);
       case VersusPage.connecting:
-        PixelFont.drawCentered(canvas, 'JOINING${_dots()}', _w / 2, top + 120, 3, Palette.sun);
+        PixelFont.drawCentered(canvas, '${words.joining}${_dots()}', _w / 2, top + 120, 3, Palette.sun);
         PixelFont.drawCentered(canvas, _joining, _w / 2, top + 170, 2, Palette.muted);
       case VersusPage.lobby:
         _lobby(canvas, top);
       case VersusPage.message:
-        _lines(canvas, _message, top + 140, color: Palette.text);
+        _lines(canvas, _message(words), top + 140, color: Palette.text);
     }
 
     for (final button in buttons) {
@@ -363,10 +359,11 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
   void _lobby(Canvas canvas, double top) {
     final match = game.match;
     if (match == null) return;
+    final words = game.strings;
     final mine = Rect.fromLTWH(16, top + 60, 176, 190), theirs = Rect.fromLTWH(208, top + 60, 176, 190);
     for (final (rect, label, skin, here, ghost) in [
-      (mine, 'YOU', game.state.skin, true, false),
-      (theirs, 'FRIEND', Shop.skin(match.friendSkin ?? ''), match.friendHere, true),
+      (mine, words.you, game.state.skin, true, false),
+      (theirs, words.friend, Shop.skin(match.friendSkin ?? ''), match.friendHere, true),
     ]) {
       drawPanel(canvas, rect);
       PixelFont.drawCentered(canvas, label, rect.center.dx, rect.top + 12, 2, Palette.muted);
@@ -378,11 +375,11 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
       if (ghost) canvas.saveLayer(rect, _faded); // the friend shows as a ghost, as in the race
       _bunny(canvas, game.sprites.skin(skin), anchor, 3, wingsUp: (_time * 5 + rect.left).floor().isEven);
       if (ghost) canvas.restore();
-      PixelFont.drawCentered(canvas, skin.name, rect.center.dx, rect.bottom - 30, 2, Palette.text);
+      PixelFont.drawCentered(canvas, words.itemName(skin), rect.center.dx, rect.bottom - 30, 2, Palette.text);
     }
     final List<String> status = match.hosting
-        ? (match.friendHere ? (match.ready ? const ['GET READY!'] : const []) : const ['SAYING HELLO...'])
-        : const ['WAITING FOR THE HOST', 'TO START THE RACE'];
+        ? (match.friendHere ? (match.ready ? [words.getReady] : const []) : [words.sayingHello])
+        : words.waitingForHost;
     _lines(canvas, status, top + 276, color: Palette.sun);
   }
 
@@ -409,7 +406,7 @@ class VersusScreen extends Component with HasGameReference<GoingUpGame> {
     if (g == null) return;
     final skin = Shop.skin(g.skin);
     _bunny(canvas, game.sprites.skin(skin), Offset(rect.left + 34, rect.top + 26), 1.4, wingsUp: false);
-    PixelFont.draw(canvas, "${skin.name}'S GAME", rect.left + 70, rect.top + 11, 2, Palette.text);
+    PixelFont.draw(canvas, game.strings.gameOf(game.strings.itemName(skin)), rect.left + 70, rect.top + 11, 2, Palette.text);
     PixelFont.draw(canvas, g.address, rect.left + 70, rect.top + 31, 2, Palette.muted);
   }
 

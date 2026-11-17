@@ -16,6 +16,13 @@ enum GameMode { title, playing, dead }
 /// Collectible power-ups. Only the shield is left: it waits for a hit.
 enum PowerUp { shield }
 
+/// What a message flashed on screen during a run says. The HUD puts it into words, in the
+/// player's language.
+enum Toast {
+  shield, shieldSaved, shieldBroken, secondChance, newBest, milestone, theyFoundYou, memory, turbo,
+  tripleShield,
+}
+
 /// Sound effects. Coins are silent: picking them up happens too often to want a sound.
 enum Sfx {
   shield, bump, crash, takeoff, ghost, milestone, newBest, hollowPop, realm, memory, glitch,
@@ -54,6 +61,9 @@ class SavedProgress {
     this.skin,
     this.trail,
     this.memories = const [],
+    this.watched = const [],
+    this.turbos = 0,
+    this.tripleShields = 0,
   });
 
   /// Most meters flown in one run.
@@ -71,8 +81,11 @@ class SavedProgress {
   final List<String> owned;
   final String? skin, trail;
 
-  /// Ids of the memories Pip has got back.
-  final List<String> memories;
+  /// Ids of the memories Pip has got back, and of those watched in the memories book.
+  final List<String> memories, watched;
+
+  /// Power-ups bought in the shop and not used yet.
+  final int turbos, tripleShields;
 }
 
 /// One point of the bunny's flight path, in world coordinates. World y grows upward, so a
@@ -184,6 +197,10 @@ class GameState {
   static const double minHeight = 640, maxHeight = 870;
   static const double defaultHeight = 720;
   static const double bunnyPixel = 2.2; // size of one bunny sprite pixel
+
+  /// On a touch screen the bunny flies this far above the finger (field units: about 2.5 cm on a
+  /// phone), so the thumb doesn't hide it or the tunnel just ahead.
+  static const double touchLift = 140;
   static const double bunnyLength = 25 * bunnyPixel; // the whole sprite, ears to feet
 
   /// The bunny is half a meter long.
@@ -234,8 +251,8 @@ class GameState {
   /// The run ended on a hollow rather than a wall.
   bool spooked = false;
 
-  /// Part of a versus match: memories don't pause the run (they wait in the book), there's no
-  /// "last crash" ghost, and a new run starts only when the match says so.
+  /// Part of a versus match: there's no "last crash" ghost, and a new run starts only when the
+  /// match says so.
   bool versus = false;
 
   /// The run was stopped by the match (the other player crashed) rather than by a crash.
@@ -256,22 +273,11 @@ class GameState {
   int realm = 0;
   double realmCardTime = 0;
 
-  /// Ids of the memories Pip has got back, the one coming back right now and how long it has
-  /// been showing, and whether any came back since the memories book was last opened.
-  final Set<String> memories = {};
-  Memory? shownMemory;
-  double memoryAge = 0;
+  /// Ids of the memories Pip has got back, the ones already watched in the memories book,
+  /// and whether any came back since the book was last opened. Memories never interrupt a
+  /// run: they're found there and watched from the home screen.
+  final Set<String> memories = {}, watched = {};
   bool newMemories = false;
-
-  /// Whether a memory pauses the run until the player continues. The app turns this on;
-  /// without it (as in most tests) a memory shows for [memorySeconds] while the run goes on.
-  bool pauseForMemories = false;
-  static const double memorySeconds = 6;
-
-  /// Seconds into closing the memory (the ink drawing back into the bunny), or -1.
-  double memoryOutro = -1;
-  static const double memoryOutroSeconds = 0.6;
-  final List<Memory> _waitingMemories = []; // came back while another was being read
   final Set<int> _forksPlanned = {}; // realms whose memory fork is in the tunnel this run
   int _groupId = 0;
 
@@ -287,7 +293,19 @@ class GameState {
   /// What the skin and trail being worn do.
   bool hasPerk(Perk perk) => skin.perk == perk || trailStyle.perk == perk;
 
-  bool shield = false;
+  /// Hits the shield can still take: 1 from a shield in the tunnel (or the starting-shield
+  /// perk), 3 from a triple shield bought in the shop. 0 is no shield.
+  int shieldHits = 0;
+  bool _tripleShield = false; // the shield on is a triple shield
+  bool get shield => shieldHits > 0;
+  set shield(bool on) {
+    shieldHits = on ? math.max(shieldHits, 1) : 0;
+    if (!on) _tripleShield = false;
+  }
+
+  /// Power-ups bought in the shop and not used yet. They're used during a run, from their
+  /// buttons in the corner.
+  int turbos = 0, tripleShields = 0;
 
   /// The phoenix trail's forgiven crash, while it's still unused this run.
   bool spareLife = false;
@@ -300,7 +318,10 @@ class GameState {
   bool holding = false;
   double _touchOffset = 0;
   double grace = 0, deadTime = 0, shake = 0, popTime = 0, coinPopTime = 0;
-  String toast = '';
+  Toast toast = Toast.shield;
+
+  /// The number in the toast (the meters for [Toast.milestone]).
+  int toastValue = 0;
   double toastTime = 0;
 
   double _hitTime = -1; // seconds since the shield took a hit, or -1
@@ -424,6 +445,9 @@ class GameState {
         skin: skinId,
         trail: trailStyleId,
         memories: memories.toList()..sort(),
+        watched: watched.toList()..sort(),
+        turbos: turbos,
+        tripleShields: tripleShields,
       );
 
   void restore(SavedProgress saved) {
@@ -439,70 +463,26 @@ class GameState {
     if (skin != null && owns(Shop.skin(skin))) skinId = Shop.skin(skin).id;
     if (trail != null && owns(Shop.trail(trail))) trailStyleId = Shop.trail(trail).id;
     memories.addAll(saved.memories.where(Memories.exists));
+    watched.addAll(saved.watched.where(memories.contains));
+    turbos += saved.turbos; // like coins: keeps any bought before the save finished loading
+    tripleShields += saved.tripleShields;
   }
 
   // ---------- memories ----------
 
-  /// Brings back [memory] if it was forgotten: shows it (in a versus match it just goes in
-  /// the book), and reports it for saving.
+  /// Brings back [memory] if it was forgotten: a chime and a word on screen, and it's saved to
+  /// be watched later in the memories book. The run goes on.
   void _remember(Memory memory) {
     if (!memories.add(memory.id)) return;
     newMemories = true;
-    onSave?.call(progress);
-    if (versus) {
-      _showToast('A MEMORY. READ IT IN THE BOOK.');
-      _sound(Sfx.memory);
-    } else if (shownMemory != null) {
-      _waitingMemories.add(memory); // one at a time, so each can be read to the end
-    } else {
-      _show(memory);
-    }
-  }
-
-  void _show(Memory memory) {
-    shownMemory = memory;
-    memoryAge = 0;
-    memoryOutro = -1;
     _sound(Sfx.memory);
-    if (readingMemory) {
-      holding = false; // the bunny waits where it is
-      if (memory.arrival) realmCardTime = 0; // the memory names the realm itself
-    }
+    if (mode == GameMode.playing) _showToast(Toast.memory);
+    onSave?.call(progress);
   }
 
-  /// The run is paused on a memory, waiting for the player to read it and continue.
-  bool get readingMemory => pauseForMemories && !versus && shownMemory != null && mode == GameMode.playing;
-
-  /// How long the memory's words take to type themselves out.
-  double get memoryTypingSeconds => shownMemory == null ? 0 : 0.8 + shownMemory!.text.length / 30;
-  bool get memoryTyped => memoryAge >= memoryTypingSeconds;
-
-  /// The player pressed to continue: the first press finishes the words, the next moves on to
-  /// the next memory waiting, or closes the memory and goes back to the run. Presses in the
-  /// first moment are ignored, so a press that was already happening doesn't skip the memory.
-  void continueMemory() {
-    if (!readingMemory || memoryAge < 0.5 || memoryOutro >= 0) return;
-    if (!memoryTyped) {
-      memoryAge = memoryTypingSeconds;
-    } else if (_waitingMemories.isNotEmpty) {
-      _show(_waitingMemories.removeAt(0));
-    } else {
-      memoryOutro = 0; // the ink draws back first; then the run goes on
-    }
-  }
-
-  void _nextMemory() {
-    if (_waitingMemories.isNotEmpty) {
-      _show(_waitingMemories.removeAt(0));
-      return;
-    }
-    final paused = readingMemory;
-    shownMemory = null;
-    memoryOutro = -1;
-    if (paused) {
-      grace = math.max(grace, 1.2); // a moment to get going again
-      holding = false;
-    }
+  /// [memory] has been watched in the memories book.
+  void markWatched(Memory memory) {
+    if (memories.contains(memory.id) && watched.add(memory.id)) onSave?.call(progress);
   }
 
   /// Where realm [r]'s memory fork is: a little after the realm begins (so its "ENTERING"
@@ -539,13 +519,49 @@ class GameState {
     }
   }
 
+  // ---------- power-ups from the shop ----------
+
+  /// Uses a turbo: the run jumps ahead to the speed it would have reached
+  /// [GameTuning.turboSeconds] later. For when the start feels too slow.
+  bool useTurbo() {
+    if (mode != GameMode.playing || turbos <= 0) return false;
+    turbos--;
+    runTime += tuning.turboSeconds;
+    _showToast(Toast.turbo);
+    _sound(Sfx.takeoff);
+    _burst(bunnyX, tailWorldY, 30, trailStyle.stripes, 80, 360);
+    onSave?.call(progress);
+    return true;
+  }
+
+  /// Uses a triple shield: a shield that takes three hits before it breaks.
+  bool useTripleShield() {
+    if (mode != GameMode.playing || tripleShields <= 0 || shieldHits >= 3) return false;
+    tripleShields--;
+    shieldHits = 3;
+    _tripleShield = true;
+    _showToast(Toast.tripleShield);
+    _sound(Sfx.shield);
+    _burst(bunnyX, worldY(bunnyY), 26, const [Palette.shield, Palette.text], 60, 240);
+    onSave?.call(progress);
+    return true;
+  }
+
   // ---------- shop ----------
 
-  bool owns(ShopItem item) => item.price == 0 || owned.contains(item.id);
+  /// Skins and trails are owned once bought; power-ups are used up, so they're never owned.
+  bool owns(ShopItem item) => item is! PowerUpItem && (item.price == 0 || owned.contains(item.id));
 
   bool isWearing(ShopItem item) => switch (item) {
         BunnySkin() => item.id == skinId,
         TrailStyle() => item.id == trailStyleId,
+        PowerUpItem() => false,
+      };
+
+  /// How many of power-up [item] are waiting to be used.
+  int countOf(PowerUpItem item) => switch (item.boost) {
+        Boost.turbo => turbos,
+        Boost.tripleShield => tripleShields,
       };
 
   bool canAfford(ShopItem item) => coins >= item.price;
@@ -555,6 +571,16 @@ class GameState {
   bool buy(ShopItem item) {
     if (owns(item) || !canAfford(item)) return false;
     coins -= item.price;
+    if (item is PowerUpItem) {
+      switch (item.boost) {
+        case Boost.turbo:
+          turbos++;
+        case Boost.tripleShield:
+          tripleShields++;
+      }
+      onSave?.call(progress);
+      return true;
+    }
     owned.add(item.id);
     wear(item);
     return true;
@@ -568,6 +594,8 @@ class GameState {
         skinId = item.id;
       case TrailStyle():
         trailStyleId = item.id;
+      case PowerUpItem():
+        return;
     }
     onSave?.call(progress);
   }
@@ -577,11 +605,7 @@ class GameState {
   /// Pointer position is in field units. Touch lifts the steering point above the finger.
   void pointerDown(double x, double y, {bool touch = false}) {
     touchUi = touch;
-    if (readingMemory) {
-      continueMemory();
-      return;
-    }
-    _touchOffset = touch ? 70 : 0;
+    _touchOffset = touch ? touchLift : 0;
     holding = true;
     pointerMove(x, y);
     if (!versus && (mode == GameMode.title || canRetry)) _startGame();
@@ -626,7 +650,6 @@ class GameState {
     distance = 0;
     realm = 0;
     realmCardTime = 0;
-    shownMemory = null;
     shield = false;
     marker = null;
     trail.clear();
@@ -638,8 +661,8 @@ class GameState {
   void applyPowerUp(PowerUp p) {
     switch (p) {
       case PowerUp.shield:
-        shield = true;
-        _showToast('SHIELD!');
+        shield = true; // never weakens a triple shield
+        _showToast(Toast.shield);
     }
   }
 
@@ -657,15 +680,6 @@ class GameState {
 
   void _tick(double h) {
     time += h;
-    if (readingMemory) {
-      memoryAge += h; // everything else waits
-      speed = 0;
-      if (memoryOutro >= 0) {
-        memoryOutro += h;
-        if (memoryOutro >= memoryOutroSeconds) _nextMemory();
-      }
-      return;
-    }
     switch (mode) {
       case GameMode.playing:
         _updateEffects(h);
@@ -735,10 +749,6 @@ class GameState {
     coinPopTime = math.max(0.0, coinPopTime - h);
     toastTime = math.max(0.0, toastTime - h);
     realmCardTime = math.max(0.0, realmCardTime - h);
-    if (shownMemory != null) {
-      memoryAge += h;
-      if (memoryAge >= memorySeconds) _nextMemory(); // not pausing: it shows for a while, then goes
-    }
   }
 
   void _updateEffects(double h) {
@@ -752,13 +762,15 @@ class GameState {
   /// if nothing could, and the run ends.
   bool _survive({Hollow? hollow}) {
     if (shield) {
-      shield = false;
-      _absorbHit(hollow: hollow, message: 'SHIELD SAVED YOU!');
+      shieldHits--;
+      final broke = _tripleShield && shieldHits == 0;
+      if (shieldHits == 0) _tripleShield = false;
+      _absorbHit(hollow: hollow, message: broke ? Toast.shieldBroken : Toast.shieldSaved);
       return true;
     }
     if (spareLife) {
       spareLife = false;
-      _absorbHit(hollow: hollow, message: 'SECOND CHANCE!');
+      _absorbHit(hollow: hollow, message: Toast.secondChance);
       return true;
     }
     return false;
@@ -766,7 +778,7 @@ class GameState {
 
   /// The hit is soaked up: the bunny gets a moment to steer clear, and the level slows down
   /// before catching back up. A wall puts the bunny back inside the gap; a hollow pops.
-  void _absorbHit({Hollow? hollow, required String message}) {
+  void _absorbHit({Hollow? hollow, required Toast message}) {
     _hitTime = 0;
     grace = 1.2;
     shake = 0.5;
@@ -928,10 +940,8 @@ class GameState {
     _warnedHollows = false;
     realm = 0;
     realmCardTime = 0;
-    shownMemory = null;
-    memoryAge = 0;
-    _waitingMemories.clear(); // still remembered, just not shown again
-    shield = hasPerk(Perk.startShield);
+    shieldHits = hasPerk(Perk.startShield) ? 1 : 0;
+    _tripleShield = false;
     spareLife = hasPerk(Perk.secondChance);
     _hitTime = -1;
     _hollowClock = 0;
@@ -964,10 +974,10 @@ class GameState {
   void _onNewMeter(int m) {
     final every = tuning.milestoneEveryMeters;
     if (best > 0 && m == best + 1) {
-      _showToast('NEW BEST!');
+      _showToast(Toast.newBest);
       _sound(Sfx.newBest);
     } else if (every > 0 && m > 0 && m % every == 0) {
-      _showToast('$m METERS!');
+      _showToast(Toast.milestone, m);
       _sound(Sfx.milestone);
     } else {
       return;
@@ -976,8 +986,9 @@ class GameState {
     _burst(width / 2, worldY(height * 0.3), 36, Palette.sprinkles, 80, 380);
   }
 
-  void _showToast(String text) {
-    toast = text;
+  void _showToast(Toast what, [int value = 0]) {
+    toast = what;
+    toastValue = value;
     toastTime = 1.6;
   }
 
@@ -1125,7 +1136,7 @@ class GameState {
     hollows.add(Hollow(wy, centre, reach, rate, _rand(0, 2 * math.pi)));
     if (!_warnedHollows) {
       _warnedHollows = true;
-      _showToast('THEY FOUND YOU.');
+      _showToast(Toast.theyFoundYou);
     }
   }
 

@@ -11,7 +11,7 @@ import '../pixel_font.dart';
 import '../sprites.dart';
 
 /// The coin shop, opened from the title and game-over screens: a shelf of bunny skins and one
-/// of trails, six to a page, a big preview of the selected item (with what it does, for the
+/// of trails, six to a page, and one of power-ups to use during a run, a big preview of the selected item (with what it does, for the
 /// dearest ones), and a button to buy or wear it. Drawn in field coordinates over everything
 /// but the speaker button.
 class ShopScreen extends Component with HasGameReference<GoingUpGame> {
@@ -39,7 +39,7 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
   void _show(Shelf next) {
     shelf = next;
     final items = Shop.shelf(next);
-    final worn = items.indexWhere(game.state.isWearing);
+    final worn = math.max(0, items.indexWhere(game.state.isWearing)); // power-ups are never worn
     _select(items[worn]);
     page = worn ~/ perPage;
   }
@@ -63,7 +63,7 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
     return top + math.max(0.0, spare / 2);
   }
 
-  Rect tab(Shelf s) => Rect.fromLTWH(s == Shelf.bunnies ? 16 : 204, _top + 50, 180, 36);
+  Rect tab(Shelf s) => Rect.fromLTWH(16 + s.index * (352 / 3 + 8), _top + 50, 352 / 3, 36);
   Rect get preview => Rect.fromLTWH(16, _top + 96, _w - 32, 150);
   Rect card(int i) => Rect.fromLTWH(16 + (i % 3) * (352 / 3 + 8), _top + 256 + (i ~/ 3) * 98, 352 / 3, 90);
   Rect get prevPage => Rect.fromLTWH(16, _top + 452, 56, 28);
@@ -137,7 +137,8 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
     canvas.drawRect(Rect.fromLTWH(0, 0, _w, state.height), Paint()..color = Palette.page.withValues(alpha: 0.9));
 
     final top = _top;
-    PixelFont.draw(canvas, 'SHOP', 16, top + 2, 5, Palette.text, shadow: Palette.hot);
+    final words = game.strings;
+    PixelFont.draw(canvas, words.shop, 16, top + 2, 5, Palette.text, shadow: Palette.hot);
     final coinText = '${state.coins}';
     final coinW = 36 + PixelFont.widthOf(coinText, 2);
     drawPanel(canvas, Rect.fromLTWH(_w - 16 - coinW, top + 6, coinW, 26));
@@ -147,8 +148,7 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
     for (final s in Shelf.values) {
       final rect = tab(s), active = s == shelf;
       drawPanel(canvas, rect, edge: active ? Palette.sun : Palette.panelEdge);
-      PixelFont.drawCentered(canvas, s == Shelf.bunnies ? 'BUNNIES' : 'TRAILS', rect.center.dx, rect.top + 11, 2,
-          active ? Palette.sun : Palette.muted);
+      PixelFont.drawCentered(canvas, words.shelf(s), rect.center.dx, rect.top + 11, 2, active ? Palette.sun : Palette.muted);
     }
 
     _preview(canvas, state, t);
@@ -163,40 +163,70 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
 
     final back = backButton;
     drawPanel(canvas, back);
-    PixelFont.drawCentered(canvas, 'BACK', back.center.dx, back.top + 11, 3, Palette.text);
+    PixelFont.drawCentered(canvas, words.back, back.center.dx, back.top + 11, 3, Palette.text);
   }
 
   void _preview(Canvas canvas, GameState state, double t) {
     final rect = preview;
     drawPanel(canvas, rect, edge: _cheer > 0 && blinkOn(t * 2) ? Palette.sun : Palette.panelEdge);
+    final words = game.strings;
     final skin = selected is BunnySkin ? selected as BunnySkin : state.skin;
     final trail = selected is TrailStyle ? selected as TrailStyle : state.trailStyle;
-
-    // the bunny flying in place, its trail streaming down to the bottom of the panel
-    const s = 3.0;
     final anchor = Offset(rect.left + 92, rect.top + 56 + math.sin(t * 3) * 4);
     canvas.save();
     canvas.clipRRect(RRect.fromRectAndRadius(rect.deflate(2), const Radius.circular(5)));
-    _trail(canvas, trail, anchor + const Offset(0, 8 * s), rect.bottom, s, t);
-    _bunny(canvas, game.sprites.skin(skin), anchor, s, wingsUp: (t * 5).floor().isEven);
-    if (_cheer > 0) _sparkles(canvas, anchor + const Offset(0, 4 * s), t);
+    final item = selected;
+    if (item is PowerUpItem) {
+      // the power-up's mark, big, pulsing
+      _powerUpIcon(canvas, item, Offset(rect.left + 92, rect.top + 80), 2.2 + 0.1 * math.sin(t * 4));
+    } else {
+      // the bunny flying in place, its trail streaming down to the bottom of the panel
+      const s = 3.0;
+      _trail(canvas, trail, anchor + const Offset(0, 8 * s), rect.bottom, s, t);
+      _bunny(canvas, game.sprites.skin(skin), anchor, s, wingsUp: (t * 5).floor().isEven);
+    }
+    if (_cheer > 0) _sparkles(canvas, item is PowerUpItem ? Offset(rect.left + 92, rect.top + 80) : anchor + const Offset(0, 12), t);
     canvas.restore();
 
     final x = rect.left + 186;
-    PixelFont.draw(canvas, selected.shelf == Shelf.bunnies ? 'BUNNY' : 'TRAIL', x, rect.top + 20, 2, Palette.muted);
-    PixelFont.draw(canvas, selected.name, x, rect.top + 40, 3, Palette.text, shadow: Palette.ink);
-    _status(canvas, state, selected, x, rect.top + 72, 2, align: 0);
-    if (_cheer > 0) PixelFont.draw(canvas, 'YAY!', x, rect.top + 94, 3, Palette.sun, shadow: Palette.hot);
+    PixelFont.draw(canvas, words.kind(item.shelf), x, rect.top + 20, 2, Palette.muted);
+    final name = words.itemName(item);
+    PixelFont.draw(canvas, name, x, rect.top + 40, math.min(3.0, 170 / (name.length * 6 - 1)), Palette.text, shadow: Palette.ink);
+    if (item is PowerUpItem) {
+      final help = words.powerUpHelp(item.boost);
+      for (var i = 0; i < help.length; i++) {
+        PixelFont.draw(canvas, help[i], x, rect.top + 68 + i * 14, 1.4, Palette.muted);
+      }
+      PixelFont.draw(canvas, words.have(state.countOf(item)), x, rect.top + 114, 2, Palette.glimmer);
+      if (_cheer > 0) PixelFont.draw(canvas, words.yay, x, rect.top + 132, 2, Palette.sun, shadow: Palette.hot);
+      return;
+    }
+    _status(canvas, state, item, x, rect.top + 72, 2, align: 0);
+    if (_cheer > 0) PixelFont.draw(canvas, words.yay, x, rect.top + 94, 3, Palette.sun, shadow: Palette.hot);
 
     // what it does, on a band across the bottom
-    final perk = selected.perk;
+    final perk = item.perk;
     if (perk != Perk.none) {
       final band = Rect.fromLTWH(rect.left + 6, rect.bottom - 34, rect.width - 12, 28);
       drawPanel(canvas, band, edge: Palette.glimmer);
-      final w = 20 + PixelFont.widthOf(perk.description, 2);
+      final text = words.perk(perk);
+      final px = math.min(2.0, (band.width - 32) / (text.length * 6 - 1));
+      final w = 20 + PixelFont.widthOf(text, px);
       final left = band.center.dx - w / 2;
       _perkStar(canvas, Offset(left + 6, band.center.dy), 6, t);
-      PixelFont.draw(canvas, perk.description, left + 20, band.top + 7, 2, Palette.glimmer);
+      PixelFont.draw(canvas, text, left + 20, band.center.dy - 3.5 * px, px, Palette.glimmer);
+    }
+  }
+
+  /// A power-up's mark at scale [k]: a lightning bolt for the turbo, a shield badge marked X3.
+  void _powerUpIcon(Canvas canvas, PowerUpItem item, Offset c, double k) {
+    switch (item.boost) {
+      case Boost.turbo:
+        canvas.drawCircle(c, 15 * k, Paint()..color = Palette.sun.withValues(alpha: 0.15));
+        drawBolt(canvas, c, 26 * k, Palette.sun);
+      case Boost.tripleShield:
+        drawPowerUp(canvas, c, PowerUp.shield, 13 * k);
+        PixelFont.drawCentered(canvas, 'X3', c.dx + 12 * k, c.dy + 6 * k, 1.2 * k, Palette.text, shadow: Palette.ink);
     }
   }
 
@@ -256,9 +286,20 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
         _bunny(canvas, game.sprites.skin(item), Offset(c, rect.top + 28 + 1.5 * s), s, wingsUp: false);
       case TrailStyle():
         _arc(canvas, item, Offset(c, rect.top + 46), 24);
+      case PowerUpItem():
+        _powerUpIcon(canvas, item, Offset(c, rect.top + 28), 1);
+        final have = state.countOf(item);
+        if (have > 0) {
+          final text = 'X$have';
+          final w = PixelFont.widthOf(text, 1.5) + 8;
+          final badge = Rect.fromLTWH(rect.right - w - 4, rect.top + 4, w, 15);
+          canvas.drawRRect(RRect.fromRectAndRadius(badge, const Radius.circular(4)), Paint()..color = Palette.hot);
+          PixelFont.drawCentered(canvas, text, badge.center.dx, badge.top + 2.5, 1.5, Palette.text);
+        }
     }
     if (item.perk != Perk.none) _perkStar(canvas, rect.topRight + const Offset(-12, 12), 6, t);
-    PixelFont.drawCentered(canvas, item.name, c, rect.top + 54, 2, Palette.text);
+    final name = game.strings.itemName(item);
+    PixelFont.drawCentered(canvas, name, c, rect.top + 54, math.min(2.0, (rect.width - 8) / (name.length * 6 - 1)), Palette.text);
     _status(canvas, state, item, c, rect.top + 71, 2, align: 0.5);
   }
 
@@ -267,7 +308,7 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
   void _status(Canvas canvas, GameState state, ShopItem item, double x, double y, double px, {required double align}) {
     if (state.isWearing(item) || state.owns(item)) {
       final wearing = state.isWearing(item);
-      final text = wearing ? 'WEARING' : 'OWNED';
+      final text = wearing ? game.strings.wearing : game.strings.owned;
       PixelFont.draw(canvas, text, x - PixelFont.widthOf(text, px) * align, y, px, wearing ? Palette.sun : Palette.muted);
       return;
     }
@@ -279,25 +320,25 @@ class ShopScreen extends Component with HasGameReference<GoingUpGame> {
   }
 
   void _action(Canvas canvas, GameState state) {
-    final rect = actionButton, item = selected;
+    final rect = actionButton, item = selected, words = game.strings;
     final c = rect.center.dx, y = rect.top + 13;
     if (state.isWearing(item)) {
       drawPanel(canvas, rect);
-      PixelFont.drawCentered(canvas, 'WEARING', c, y, 3, Palette.muted);
+      PixelFont.drawCentered(canvas, words.wearing, c, y, 3, Palette.muted);
     } else if (state.owns(item)) {
       drawPanel(canvas, rect, edge: Palette.sun);
-      PixelFont.drawCentered(canvas, 'WEAR IT', c, y, 3, Palette.sun);
+      PixelFont.drawCentered(canvas, words.wearIt, c, y, 3, Palette.sun);
     } else if (state.canAfford(item)) {
       drawPanel(canvas, rect, edge: Palette.sun);
-      final price = '${item.price}';
-      final w = PixelFont.widthOf('BUY', 3) + 14 + 22 + PixelFont.widthOf(price, 3);
+      final price = '${item.price}', buy = words.buy;
+      final w = PixelFont.widthOf(buy, 3) + 14 + 22 + PixelFont.widthOf(price, 3);
       final left = c - w / 2;
-      PixelFont.draw(canvas, 'BUY', left, y, 3, Palette.sun);
-      drawCoin(canvas, Offset(left + PixelFont.widthOf('BUY', 3) + 14 + 10, y + 10), 10);
-      PixelFont.draw(canvas, price, left + PixelFont.widthOf('BUY', 3) + 36, y, 3, Palette.sun);
+      PixelFont.draw(canvas, buy, left, y, 3, Palette.sun);
+      drawCoin(canvas, Offset(left + PixelFont.widthOf(buy, 3) + 14 + 10, y + 10), 10);
+      PixelFont.draw(canvas, price, left + PixelFont.widthOf(buy, 3) + 36, y, 3, Palette.sun);
     } else {
       drawPanel(canvas, rect);
-      PixelFont.drawCentered(canvas, 'NEED ${item.price - state.coins} MORE COINS', c, rect.top + 17, 2, Palette.muted);
+      PixelFont.drawCentered(canvas, words.needMore(item.price - state.coins), c, rect.top + 17, 2, Palette.muted);
     }
   }
 

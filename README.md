@@ -1,7 +1,8 @@
 # goingUP
 
 A winged pixel bunny flies up an endless rainbow tunnel. Press and hold (or touch and hold) and the
-bunny follows your pointer; let go and it stays put. Touch a wall and the run ends. The tunnel
+bunny follows your pointer (on a touch screen it flies about 2.5 cm above your finger, so your thumb
+doesn't hide it); let go and it stays put. Touch a wall and the run ends. The tunnel
 speeds up the longer you survive, and the top-right counter shows how many meters you have flown
 (the bunny is half a meter long, ears to feet). After a crash, the next run shows a "LAST CRASH"
 ghost where you went down. Late in a run, the Hollow Ones come hopping, and the coins you collect
@@ -30,7 +31,7 @@ narrowing to 104 to 170 as it gets harder. Open space is rare and short.
 ## The coin shop
 
 The **SHOP** button (bottom-right on the title and game-over screens) opens the coin shop. When
-there's something new you can afford, the button turns gold and a pink dot blinks.
+there's a new bunny or trail you can afford, the button turns gold and a pink dot blinks.
 
 Each shelf has 13 items, six to a page (turn the page with the arrows). Up to 2000 coins they only
 change the look. Past 2000 each one also does something, shown on the preview and marked with a
@@ -59,6 +60,16 @@ spare.
 - Switching between items you own is free.
 - The crash burst takes the colours of your trail.
 - Escape (or **BACK**) closes the shop.
+
+The third shelf, **POWER-UPS**, sells things you use up, as many as you like:
+
+| Power-up | Price | During a run |
+| --- | --- | --- |
+| Turbo | 25 | Its lightning button (bottom-right) jumps the run ahead to the speed it would reach 35 s later, about 190 to about 420 units a second. For when the start feels slow. |
+| Shield X3 | 60 | Its button (above the turbo) puts on a shield that takes 3 hits before it breaks, with a pip for each hit left. The 4th hit gets through. |
+
+Their buttons show how many you have, and pressing one doesn't steer the bunny. Shields found in
+the tunnel still take one hit (and never weaken a triple shield).
 
 Items live in `lib/game/shop.dart`. Each item has an `id` that is saved on the device, so never
 rename one. Perks are the `Perk` enum there; `GameState.hasPerk` is where the rules check them.
@@ -154,15 +165,18 @@ Void reveals why every fall starts it again at the bottom.
   take neither. Next run, whatever wasn't taken waits at the fork again, with the next fragment in
   story order. Once a realm's memory or all its fragments are found, the other waits alone in the
   middle, and once everything is found the fork stands empty.
-- **Flashbacks:** when a memory comes back the run pauses. The screen flashes, the frozen world
-  washes to sepia with ink at the edges, the music goes quiet, and the memory plays as a little
-  animated ink picture in an old frame while its words type themselves out on a torn strip of
-  paper. "TAP TO CONTINUE" (or click, Space or Enter) finishes the words, then goes back to the run;
-  the bunny waits until you hold again, with a moment of safety. Memories that come back together
-  wait their turn.
+- **Found during a run, watched at home:** a memory never stops the run. When one comes back
+  there's a music-box chime and "A MEMORY RETURNED", and the MEMORIES button on the home and
+  game-over screens lights up.
 - **The MEMORIES book** (bottom-centre on the title and game-over screens) keeps every memory found,
-  one page per realm. Forgotten ones are left as shadows. The button glows when something new has
-  come back.
+  one page per realm. Forgotten ones are left as shadows, and ones not watched yet are marked NEW.
+  Tap a memory to watch it as a flashback: ink bleeds out from it with splatter and drips, soaks
+  away to leave an old page, and a paper-theatre scene unfolds like a pop-up book while the words
+  type out. The family is drawn from Pip's own sprite in sepia, and each scene acts its memory out
+  in two or three beats. The deeper the realm, the more corrupted it plays: slipping slices, a red
+  ghost copy, film burns and letters breaking into symbols (the last memory comes through almost
+  clear). Tap (or Space or Enter) to finish the words, then again to let the page burn away from
+  the edges, embers rising, back to the book.
 
 The story lives in `lib/game/memories.dart`: 20 memories, an arrival and three fragments for each
 realm. Text is upper case, in the pixel font's characters (A-Z, 0-9 and `! ? & ' : . , - + % /`).
@@ -190,12 +204,20 @@ python tool/make_sfx.py
 On the web, music and sound effects start with your first tap or click, because browsers block
 sound before that.
 
+## English and Spanish
+
+The **EN / ES** button (bottom-left, next to the speaker, on the title and game-over screens)
+switches every word in the game: menus, messages, realm names, the shop, the two-player screens,
+and all 20 memories. The choice is saved; until it's made, the
+game speaks the device's language. All the words live in `lib/game/strings.dart`, and the pixel
+font has the Spanish letters (Á É Í Ó Ú Ü Ñ ¿ ¡).
+
 ## Saved on the device
 
 Through `shared_preferences`: the best run, the last run (meters flown and the crash point used for
-the ghost marker), the coins in the bank, the shop items bought and worn, the memories found, and
-whether the sound is muted. Best and last runs saved by older versions, in screens, come back
-converted to meters.
+the ghost marker), the coins in the bank, the shop items bought and worn, the power-ups waiting to be
+used, the memories found and watched, the language, and whether the sound is muted. Best and last
+runs saved by older versions, in screens, come back converted to meters.
 
 ## Racing a friend: 2 PLAYERS
 
@@ -216,8 +238,8 @@ The **2 PLAYERS** button (top-right on the title screen) races a friend on the s
   is a draw. Leaving mid-race hands the win to whoever is still flying.
 - The result shows both distances and the score. Both press **REMATCH** for a new tunnel, or
   **LEAVE**.
-- Coins count as usual, and perks work. Memories found in a race go straight into the book
-  instead of pausing the run.
+- Coins count as usual, and perks and power-ups work. Memories found in a race go straight into
+  the book, as in any run.
 
 How it works (`lib/game/versus/`): the host sends a small UDP broadcast every second on port
 47820; friends listen for it and connect over TCP on port 47821 (another port if that one is
@@ -273,7 +295,12 @@ The tests cover:
   different screen shapes.
 - Bonus zones arrive at the configured interval, full of coins, and keep clear of memory forks;
   wide spots still appear late in a fast run.
-- The shield absorbs a hit, then slows and recovers on schedule.
+- The shield absorbs a hit, then slows and recovers on schedule; a triple shield takes three hits
+  and breaks on the third.
+- A turbo makes the run much faster, only when used during a run; power-ups can be bought again
+  and again.
+- Every word exists in English and Spanish, in letters the font has, and every memory fits its
+  page in both.
 - Coins, the best run, the last crash and the shop items bought and worn are saved and restored.
 - Coins are silent, and the big moments each make a sound.
 - The Hollow Ones wait until Ashfall, only in open space, always leave a way past, end the run (or
@@ -284,8 +311,8 @@ The tests cover:
 - The climb passes through the realms in order, evenly spaced in meters, each announced once, and
   sinks into the Void; a new run starts back at the bottom.
 - Memories never come back on their own: each realm's memory and its next fragment wait side by
-  side at a fork, and taking one loses the other for that run; in the app a memory pauses the run
-  until it's read and the player continues; the story fits the font and its paper.
+  side at a fork, and taking one loses the other for that run; a memory never stops the run, and
+  the ones watched in the book are saved; the story fits the font and its paper.
 - The trail folds back when the bunny dives.
 - The run darkens steadily as you climb, is fully dark at the set screen, and a new run starts
   bright. The music mix moves smoothly from day to night.
@@ -339,7 +366,7 @@ drive it directly. `GoingUpGame` (a Flame `FlameGame`) runs it every frame and s
 | `lib/game/versus/` | Racing a friend: `lan.dart` (finding, hosting and joining games; an in-memory network for tests), `lan_io.dart` (the real sockets), `match.dart` (the race: countdown, positions, who won, rematches) |
 | `lib/game/going_up_game.dart` | The Flame game: camera, world, input, particle bursts |
 | `lib/game/memories.dart` | The Last Burrow: the 20 memories, by realm |
-| `lib/game/components/` | Flame components: `tunnel` (each realm's walls, warping and teeth), `trail`, `pickups`, `hollows`, `crash_marker`, `bunny` (sprite and wing animation), `starfield` (sunset, moon and eclipse, constellations, shooting stars, burrow shards, mist and motes), `atmosphere` (ash, fog, flicker and vignette), `hud` (with realm cards, memory flashbacks and the race's countdown and result), `shop_screen`, `memories_screen`, `versus_screen` (hosting, finding and joining), `ghost` (the friend in a race) |
+| `lib/game/components/` | Flame components: `tunnel` (each realm's walls, warping and teeth), `trail`, `pickups`, `hollows`, `crash_marker`, `bunny` (sprite and wing animation), `starfield` (sunset, moon and eclipse, constellations, shooting stars, burrow shards, mist and motes), `atmosphere` (ash, fog, flicker and vignette), `hud` (with realm cards and the race's countdown and result), `shop_screen`, `memories_screen`, `versus_screen` (hosting, finding and joining), `ghost` (the friend in a race), `flashback` (playing a memory from the book), `memory_scenes` (the 20 paper-theatre scenes) |
 | `lib/game/music.dart` | The layered soundtrack (via `flame_audio`) and its day/dusk/night mix |
 | `lib/game/sfx.dart` | Sound effects, played from small `flame_audio` pools |
 | `assets/audio/`, `tool/make_music.py` | The three music loops and the script that makes them |

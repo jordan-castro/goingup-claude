@@ -39,12 +39,29 @@ void main() {
     expect(store.read().skin, isNull);
 
     await store.write(
-        const SavedProgress(owned: ['berry', 'fire'], skin: 'berry', trail: 'fire', memories: ['sky-0', 'sky-1']));
+        const SavedProgress(
+            owned: ['berry', 'fire'],
+            skin: 'berry',
+            trail: 'fire',
+            memories: ['sky-0', 'sky-1'],
+            watched: ['sky-0'],
+            turbos: 3,
+            tripleShields: 1));
     final saved = (await SaveStore.open()).read();
     expect(saved.memories, ['sky-0', 'sky-1']);
+    expect(saved.watched, ['sky-0']);
+    expect((saved.turbos, saved.tripleShields), (3, 1));
     expect(saved.owned, ['berry', 'fire']);
     expect(saved.skin, 'berry');
     expect(saved.trail, 'fire');
+  });
+
+  test('the language is remembered once chosen', () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = await SaveStore.open();
+    expect(store.language, isNull, reason: 'until chosen, the device language is used');
+    await store.setLanguage('es');
+    expect((await SaveStore.open()).language, 'es');
   });
 
   test('the music on/off choice is remembered', () async {
