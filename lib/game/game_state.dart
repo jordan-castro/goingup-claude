@@ -197,6 +197,10 @@ class GameState {
   static const double minHeight = 640, maxHeight = 870;
   static const double defaultHeight = 720;
   static const double bunnyPixel = 2.2; // size of one bunny sprite pixel
+
+  /// On a touch screen the bunny flies this far above the finger (field units: about 2.5 cm on a
+  /// phone), so the thumb doesn't hide it or the tunnel just ahead.
+  static const double touchLift = 140;
   static const double bunnyLength = 25 * bunnyPixel; // the whole sprite, ears to feet
 
   /// The bunny is half a meter long.
@@ -601,7 +605,7 @@ class GameState {
   /// Pointer position is in field units. Touch lifts the steering point above the finger.
   void pointerDown(double x, double y, {bool touch = false}) {
     touchUi = touch;
-    _touchOffset = touch ? 70 : 0;
+    _touchOffset = touch ? touchLift : 0;
     holding = true;
     pointerMove(x, y);
     if (!versus && (mode == GameMode.title || canRetry)) _startGame();

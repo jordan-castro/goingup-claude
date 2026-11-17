@@ -625,6 +625,21 @@ void main() {
     }
   });
 
+  test('on a touch screen the bunny flies well above the finger, with a mouse right at the cursor', () {
+    double settledY({required bool touch}) {
+      final game = GameState(seed: 40, tuning: const GameTuning(hollowChance: 0, powerUpChance: 0));
+      game.pointerDown(GameState.width / 2, game.height * 0.8, touch: touch);
+      for (var i = 0; i < 60; i++) {
+        game.grace = 1;
+        game.update(_frame);
+      }
+      return game.bunnyY;
+    }
+
+    final mouse = settledY(touch: false), finger = settledY(touch: true);
+    expect(finger, closeTo(mouse - GameState.touchLift, 2));
+  });
+
   test('a turbo from the shop makes the run much faster, when the player wants it', () {
     final saves = <SavedProgress>[];
     final game = GameState(seed: 31, onSave: saves.add, tuning: const GameTuning(bonusZoneEveryMeters: 0))

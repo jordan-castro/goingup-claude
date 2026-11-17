@@ -1,7 +1,8 @@
 # goingUP
 
 A winged pixel bunny flies up an endless rainbow tunnel. Press and hold (or touch and hold) and the
-bunny follows your pointer; let go and it stays put. Touch a wall and the run ends. The tunnel
+bunny follows your pointer (on a touch screen it flies about 2.5 cm above your finger, so your thumb
+doesn't hide it); let go and it stays put. Touch a wall and the run ends. The tunnel
 speeds up the longer you survive, and the top-right counter shows how many meters you have flown
 (the bunny is half a meter long, ears to feet). After a crash, the next run shows a "LAST CRASH"
 ghost where you went down. Late in a run, the Hollow Ones come hopping, and the coins you collect
